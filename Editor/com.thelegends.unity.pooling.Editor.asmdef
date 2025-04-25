@@ -1,0 +1,18 @@
+{
+    "name": "com.thelegends.unity.pooling.Editor",
+    "rootNamespace": "com.thelegends.unity.pooling.Editor",
+    "references": [
+        "com.thelegends.unity.pooling"
+    ],
+    "includePlatforms": [
+        "Editor"
+    ],
+    "excludePlatforms": [],
+    "allowUnsafeCode": false,
+    "overrideReferences": false,
+    "precompiledReferences": [],
+    "autoReferenced": true,
+    "defineConstraints": [],
+    "versionDefines": [],
+    "noEngineReferences": false
+}

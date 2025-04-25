@@ -1,0 +1,14 @@
+{
+    "name": "com.thelegends.unity.pooling",
+    "rootNamespace": "com.thelegends.unity.pooling",
+    "references": [],
+    "includePlatforms": [],
+    "excludePlatforms": [],
+    "allowUnsafeCode": false,
+    "overrideReferences": false,
+    "precompiledReferences": [],
+    "autoReferenced": true,
+    "defineConstraints": [],
+    "versionDefines": [],
+    "noEngineReferences": false
+}

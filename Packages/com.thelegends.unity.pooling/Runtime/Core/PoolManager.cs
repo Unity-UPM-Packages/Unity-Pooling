@@ -1,6 +1,7 @@
 using System;
 using System.Collections.Generic;
 using System.Threading.Tasks;
+using TheLegends.Base.UnitySingleton;
 using UnityEngine;
 using UnityEngine.SceneManagement;
 
@@ -15,29 +16,9 @@ namespace com.thelegends.unity.pooling
     /// Central manager for object pools that provides a unified API for creating and accessing pools.
     /// Handles pool creation, access, and lifecycle management.
     /// </summary>
-    public class PoolManager
+    public class PoolManager : PersistentMonoSingleton<PoolManager>
     {
-        #region Singleton Implementation
-        
-        private static PoolManager _instance;
-        
-        /// <summary>
-        /// Gets the singleton instance of the PoolManager.
-        /// </summary>
-        public static PoolManager Instance
-        {
-            get
-            {
-                if (_instance == null)
-                {
-                    _instance = new PoolManager();
-                }
-                return _instance;
-            }
-        }
-        
-        #endregion
-        
+      
         #region Fields and Properties
         
         // Dictionaries to store pools

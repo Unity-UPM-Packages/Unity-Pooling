@@ -21,6 +21,9 @@ namespace com.thelegends.unity.pooling
         
         // Time when this object was last accessed from the pool
         internal float _lastAccessTime;
+
+        // Cached return method to avoid reflection on every return
+        private Action<GameObject> _cachedReturnMethod;
         
         /// <summary>
         /// Setup this pooled object with a reference to its owning pool and original key
@@ -35,6 +38,21 @@ namespace com.thelegends.unity.pooling
             
             // Update access time
             UpdateAccessTime();
+
+            // Cache the return method for better performance
+            if (_ownerPool != null)
+            {
+                Type poolType = _ownerPool.GetType();
+                var returnMethod = poolType.GetMethod("Return");
+                
+                if (returnMethod != null)
+                {
+                    _cachedReturnMethod = (GameObject go) => 
+                    {
+                        returnMethod.Invoke(_ownerPool, new object[] { go });
+                    };
+                }
+            }
         }
         
         /// <summary>
@@ -61,18 +79,31 @@ namespace com.thelegends.unity.pooling
                 }
             }
             
-            // Use reflection to call the correct Return method on the owner pool
-            // This is needed because we don't know the generic type at compile time
-            Type poolType = _ownerPool.GetType();
-            var returnMethod = poolType.GetMethod("Return");
-            
-            if (returnMethod != null)
+            // Use the cached return method instead of reflection every time
+            if (_cachedReturnMethod != null)
             {
-                returnMethod.Invoke(_ownerPool, new object[] { gameObject });
+                _cachedReturnMethod(gameObject);
             }
             else
             {
-                Debug.LogError($"[PooledObject] Could not find Return method on pool type {poolType.Name}");
+                // Fallback to reflection if cached method is not available
+                Type poolType = _ownerPool.GetType();
+                var returnMethod = poolType.GetMethod("Return");
+                
+                if (returnMethod != null)
+                {
+                    returnMethod.Invoke(_ownerPool, new object[] { gameObject });
+                    
+                    // Cache for future use
+                    _cachedReturnMethod = (GameObject go) => 
+                    {
+                        returnMethod.Invoke(_ownerPool, new object[] { go });
+                    };
+                }
+                else
+                {
+                    Debug.LogError($"[PooledObject] Could not find Return method on pool type {poolType.Name}");
+                }
             }
         }
         

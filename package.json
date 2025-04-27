@@ -17,5 +17,7 @@
     "name": "Unity-UPM-Packages",
     "url": "https://github.com/Unity-UPM-Packages"
   },
-  "dependencies": {}
+  "dependencies": {
+    "com.thelegends.unity.patterns": "1.0.1"
+  }
 }

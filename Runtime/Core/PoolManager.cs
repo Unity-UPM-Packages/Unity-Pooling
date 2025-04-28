@@ -23,7 +23,11 @@ namespace com.thelegends.unity.pooling
         
         // Dictionaries to store pools
         private readonly Dictionary<object, object> _pools = new Dictionary<object, object>();
-        
+
+        /// <summary>
+        /// Gets the dictionary of pools managed by the PoolManager.
+        /// </summary>
+        public Dictionary<object, object> Pools => _pools;
         // Default configurations
         private PoolConfig _defaultPoolConfig = PoolConfig.Default;
         private PoolTrimmingConfig _defaultTrimmingConfig = PoolTrimmingConfig.Default;

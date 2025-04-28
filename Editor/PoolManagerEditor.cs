@@ -948,7 +948,7 @@ namespace com.thelegends.unity.pooling.Editor
                 
                 // Get instance through Instance property (assumed to be a singleton)
                 PropertyInfo instanceProperty = _poolManagerType.GetProperty("Instance", 
-                    BindingFlags.Public | BindingFlags.Static);
+                    BindingFlags.Public | BindingFlags.Static | BindingFlags.FlattenHierarchy);
                 
                 if (instanceProperty == null)
                 {

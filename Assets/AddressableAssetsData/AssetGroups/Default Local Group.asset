@@ -17,13 +17,8 @@ MonoBehaviour:
     m_SerializedData: []
   m_GUID: 02c9d1f50b68d9841a5c5243b93fb0d8
   m_SerializeEntries:
-  - m_GUID: 42f52fa8c6dca434b9a03fe63e91a562
-    m_Address: DemoCubePool
-    m_ReadOnly: 0
-    m_SerializedLabels: []
-    FlaggedDuringContentUpdateRestriction: 0
-  - m_GUID: e4fe0c7ea1fcd05459e5786f65d17211
-    m_Address: DemoSpherePool
+  - m_GUID: b1ae05158535c6641ae9db33a0519417
+    m_Address: SpherePool
     m_ReadOnly: 0
     m_SerializedLabels: []
     FlaggedDuringContentUpdateRestriction: 0

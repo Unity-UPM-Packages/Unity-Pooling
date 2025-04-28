@@ -236,7 +236,7 @@ namespace com.thelegends.unity.pooling.Editor
             EditorGUILayout.Space();
             
             // Activity graph
-            DrawActivityGraph();
+            DrawActivityGraphs();
             EditorGUILayout.Space();
             
             // List of pools
@@ -248,66 +248,194 @@ namespace com.thelegends.unity.pooling.Editor
         /// </summary>
         private void DrawSystemStats()
         {
-            // TODO: Implement system statistics display
+            // Get the latest statistics snapshot, or use default values if no data
+            PoolStatSnapshot latestStats = _poolStatHistory.Count > 0 
+                ? _poolStatHistory[_poolStatHistory.Count - 1] 
+                : new PoolStatSnapshot();
+                
+            // Calculate total pools
+            int totalPools = latestStats.poolStats?.Count ?? 0;
+            
+            // Memory savings estimation (rough estimate based on GameObject overhead)
+            // Average GameObject overhead is about 3KB
+            long memorySavedBytes = latestStats.totalInactive * 3 * 1024;
+            string memorySavedText = FormatMemorySize(memorySavedBytes);
+            
+            // Statistics box
             EditorGUILayout.BeginVertical(EditorStyles.helpBox);
+            
+            // Title with legend
+            EditorGUILayout.BeginHorizontal();
             EditorGUILayout.LabelField("System Statistics", EditorStyles.boldLabel);
             
-            EditorGUILayout.BeginHorizontal();
-            EditorGUILayout.LabelField("Total Pools: ", GUILayout.Width(120));
-            EditorGUILayout.LabelField("0");
+            // Usage legend
+            GUILayout.FlexibleSpace();
+            EditorGUILayout.LabelField("■", new GUIStyle(EditorStyles.label) { normal = { textColor = new Color(0.2f, 0.7f, 0.2f) } }, GUILayout.Width(15));
+            EditorGUILayout.LabelField("Active", GUILayout.Width(50));
+            EditorGUILayout.LabelField("■", new GUIStyle(EditorStyles.label) { normal = { textColor = new Color(0.7f, 0.2f, 0.2f) } }, GUILayout.Width(15));
+            EditorGUILayout.LabelField("Inactive", GUILayout.Width(60));
             EditorGUILayout.EndHorizontal();
             
+            EditorGUILayout.Space(5);
+            
+            // Main stats in two columns
             EditorGUILayout.BeginHorizontal();
-            EditorGUILayout.LabelField("Active Objects: ", GUILayout.Width(120));
-            EditorGUILayout.LabelField("0");
+            
+            // Left column
+            EditorGUILayout.BeginVertical();
+            DrawStatField("Total Pools", totalPools.ToString());
+            DrawStatField("Active Objects", latestStats.totalActive.ToString());
+            DrawStatField("Inactive Objects", latestStats.totalInactive.ToString());
+            EditorGUILayout.EndVertical();
+            
+            // Right column
+            EditorGUILayout.BeginVertical();
+            DrawStatField("Memory Saved", memorySavedText);
+            DrawStatField("Get Operations", latestStats.getCount.ToString());
+            DrawStatField("Return Operations", latestStats.returnCount.ToString());
+            EditorGUILayout.EndVertical();
+            
             EditorGUILayout.EndHorizontal();
             
-            EditorGUILayout.BeginHorizontal();
-            EditorGUILayout.LabelField("Inactive Objects: ", GUILayout.Width(120));
-            EditorGUILayout.LabelField("0");
-            EditorGUILayout.EndHorizontal();
-            
-            EditorGUILayout.BeginHorizontal();
-            EditorGUILayout.LabelField("Memory Saved: ", GUILayout.Width(120));
-            EditorGUILayout.LabelField("0 KB");
-            EditorGUILayout.EndHorizontal();
-            
-            EditorGUILayout.BeginHorizontal();
-            EditorGUILayout.LabelField("Get Operations: ", GUILayout.Width(120));
-            EditorGUILayout.LabelField("0");
-            EditorGUILayout.EndHorizontal();
-            
-            EditorGUILayout.BeginHorizontal();
-            EditorGUILayout.LabelField("Return Operations: ", GUILayout.Width(120));
-            EditorGUILayout.LabelField("0");
-            EditorGUILayout.EndHorizontal();
+            // Object distribution bar
+            if (latestStats.totalActive + latestStats.totalInactive > 0)
+            {
+                EditorGUILayout.Space(5);
+                EditorGUILayout.LabelField("Object Distribution", EditorStyles.boldLabel);
+                
+                Rect barRect = GUILayoutUtility.GetRect(0, 20, GUILayout.ExpandWidth(true));
+                float totalObjects = latestStats.totalActive + latestStats.totalInactive;
+                float activeRatio = latestStats.totalActive / totalObjects;
+                
+                // Draw background
+                EditorGUI.DrawRect(barRect, new Color(0.3f, 0.3f, 0.3f));
+                
+                // Draw active part (green)
+                Rect activeRect = new Rect(barRect.x, barRect.y, barRect.width * activeRatio, barRect.height);
+                EditorGUI.DrawRect(activeRect, new Color(0.2f, 0.7f, 0.2f));
+                
+                // Draw inactive part (red)
+                Rect inactiveRect = new Rect(barRect.x + barRect.width * activeRatio, barRect.y, 
+                                         barRect.width * (1 - activeRatio), barRect.height);
+                EditorGUI.DrawRect(inactiveRect, new Color(0.7f, 0.2f, 0.2f));
+                
+                // Draw percentages
+                string activePercent = $"{activeRatio * 100:0}%";
+                string inactivePercent = $"{(1 - activeRatio) * 100:0}%";
+                
+                GUIStyle centeredLabel = new GUIStyle(EditorStyles.boldLabel) 
+                { 
+                    alignment = TextAnchor.MiddleCenter,
+                    normal = { textColor = Color.white } 
+                };
+                
+                // Only draw text if there's enough space
+                if (activeRect.width > 40)
+                    GUI.Label(activeRect, activePercent, centeredLabel);
+                    
+                if (inactiveRect.width > 40)
+                    GUI.Label(inactiveRect, inactivePercent, centeredLabel);
+            }
             
             EditorGUILayout.EndVertical();
         }
         
         /// <summary>
-        /// Draw activity graph
+        /// Draw activity graphs with time-based visualization
         /// </summary>
-        private void DrawActivityGraph()
+        private enum GraphView
         {
-            // TODO: Implement activity graph
+            Objects,
+            Operations,
+            PoolSize
+        }
+
+        private GraphView _currentGraphView = GraphView.Objects;
+
+        private void DrawActivityGraphs()
+        {
             EditorGUILayout.BeginVertical(EditorStyles.helpBox);
-            EditorGUILayout.LabelField("Activity Graph", EditorStyles.boldLabel);
             
+            // Tab selection for different graph views
+            EditorGUILayout.BeginHorizontal(EditorStyles.toolbar);
+            EditorGUILayout.LabelField("Activity Monitor", EditorStyles.boldLabel, GUILayout.Width(120));
+            
+            GUILayout.FlexibleSpace();
+            
+            // Graph view selection buttons
+            GUIStyle tabButtonStyle = new GUIStyle(EditorStyles.toolbarButton) { fontStyle = FontStyle.Bold };
+            
+            if (GUILayout.Toggle(_currentGraphView == GraphView.Objects, "Objects", tabButtonStyle))
+                _currentGraphView = GraphView.Objects;
+                
+            if (GUILayout.Toggle(_currentGraphView == GraphView.Operations, "Operations", tabButtonStyle))
+                _currentGraphView = GraphView.Operations;
+                
+            if (GUILayout.Toggle(_currentGraphView == GraphView.PoolSize, "Pool Size", tabButtonStyle))
+                _currentGraphView = GraphView.PoolSize;
+                
+            EditorGUILayout.EndHorizontal();
+            
+            // Draw the selected graph
             Rect graphRect = GUILayoutUtility.GetRect(0, 150, GUILayout.ExpandWidth(true));
             
-            GUI.Box(graphRect, "");
-            if (_poolStatHistory.Count > 0)
+            if (_poolStatHistory.Count > 1)
             {
-                // Placeholder for actual graph implementation
-                GUI.Label(new Rect(graphRect.center.x - 50, graphRect.center.y - 10, 100, 20), "Graph placeholder");
+                // Background
+                EditorGUI.DrawRect(graphRect, new Color(0.2f, 0.2f, 0.2f));
+                DrawGraphGrid(graphRect);
+                
+                switch (_currentGraphView)
+                {
+                    case GraphView.Objects:
+                        DrawObjectsGraph(graphRect);
+                        break;
+                    case GraphView.Operations:
+                        DrawOperationsGraph(graphRect);
+                        break;
+                    case GraphView.PoolSize:
+                        DrawPoolSizeGraph(graphRect);
+                        break;
+                }
+                
+                // Draw timestamp labels
+                DrawTimeLabels(graphRect);
             }
             else
             {
-                GUI.Label(new Rect(graphRect.center.x - 75, graphRect.center.y - 10, 150, 20), "No data available");
+                EditorGUI.DrawRect(graphRect, new Color(0.2f, 0.2f, 0.2f));
+                GUI.Label(new Rect(graphRect.center.x - 75, graphRect.center.y - 10, 150, 20), 
+                          "Collecting data...", 
+                          new GUIStyle(EditorStyles.label) { normal = { textColor = Color.white }, alignment = TextAnchor.MiddleCenter });
             }
             
             EditorGUILayout.EndVertical();
+        }
+        
+        /// <summary>
+        /// Draw grid lines for the graph background
+        /// </summary>
+        private void DrawGraphGrid(Rect rect)
+        {
+            // Draw vertical grid lines
+            int verticalLines = 6;
+            float step = rect.width / verticalLines;
+            
+            for (int i = 1; i < verticalLines; i++)
+            {
+                float x = rect.x + step * i;
+                EditorGUI.DrawRect(new Rect(x, rect.y, 1, rect.height), new Color(0.3f, 0.3f, 0.3f));
+            }
+            
+            // Draw horizontal grid lines
+            int horizontalLines = 4;
+            step = rect.height / horizontalLines;
+            
+            for (int i = 1; i < horizontalLines; i++)
+            {
+                float y = rect.y + step * i;
+                EditorGUI.DrawRect(new Rect(rect.x, y, rect.width, 1), new Color(0.3f, 0.3f, 0.3f));
+            }
         }
         
         /// <summary>
@@ -767,5 +895,437 @@ namespace com.thelegends.unity.pooling.Editor
             public Vector3 position; // Current position
         }
         #endregion
+        
+        #region Helper Methods
+        /// <summary>
+        /// Helper method to format memory size with appropriate units
+        /// </summary>
+        private string FormatMemorySize(long bytes)
+        {
+            if (bytes < 1024)
+                return $"{bytes} B";
+                
+            if (bytes < 1024 * 1024)
+                return $"{bytes / 1024f:F2} KB";
+                
+            if (bytes < 1024 * 1024 * 1024)
+                return $"{bytes / (1024f * 1024f):F2} MB";
+                
+            return $"{bytes / (1024f * 1024f * 1024f):F2} GB";
+        }
+
+        /// <summary>
+        /// Helper method to draw a labeled statistics field
+        /// </summary>
+        private void DrawStatField(string label, string value)
+        {
+            EditorGUILayout.BeginHorizontal();
+            EditorGUILayout.LabelField(label + ":", GUILayout.Width(120));
+            EditorGUILayout.LabelField(value, EditorStyles.boldLabel);
+            EditorGUILayout.EndHorizontal();
+        }
+        #endregion
+
+        /// <summary>
+        /// Draw time labels along the x-axis
+        /// </summary>
+        private void DrawTimeLabels(Rect rect)
+        {
+            if (_poolStatHistory.Count < 2)
+                return;
+                    
+            float lastTimestamp = _poolStatHistory[_poolStatHistory.Count - 1].timestamp;
+            float firstTimestamp = Mathf.Max(lastTimestamp - _historyTimeRange, _poolStatHistory[0].timestamp);
+            float timeSpan = lastTimestamp - firstTimestamp;
+            
+            if (timeSpan <= 0)
+                return;
+                
+            // Get style for labels
+            GUIStyle timeLabel = new GUIStyle(EditorStyles.miniLabel) 
+            { 
+                normal = { textColor = new Color(0.8f, 0.8f, 0.8f) },
+                alignment = TextAnchor.UpperCenter
+            };
+            
+            // Draw time labels
+            int labelCount = 6;
+            float step = rect.width / labelCount;
+            
+            for (int i = 0; i <= labelCount; i++)
+            {
+                float x = rect.x + step * i;
+                float time = firstTimestamp + (timeSpan * i / labelCount);
+                float relativeTime = lastTimestamp - time;
+                
+                // Format label
+                string label = relativeTime < 60 ? 
+                    $"{relativeTime:0}s" : 
+                    $"{relativeTime / 60:0}m {relativeTime % 60:00}s";
+                    
+                if (i == labelCount)
+                    label = "Now";
+                else if (i == 0)
+                    label = $"-{_historyTimeRange}s";
+                
+                // Draw label
+                GUI.Label(new Rect(x - 20, rect.y + rect.height + 2, 40, 15), label, timeLabel);
+            }
+        }
+
+        /// <summary>
+        /// Draw active/inactive objects graph
+        /// </summary>
+        private void DrawObjectsGraph(Rect rect)
+        {
+            // Get visible time range for graph
+            float lastTimestamp = _poolStatHistory[_poolStatHistory.Count - 1].timestamp;
+            float firstTimestamp = Mathf.Max(lastTimestamp - _historyTimeRange, _poolStatHistory[0].timestamp);
+            
+            // Find max value for scaling
+            int maxValue = 1; // Avoid division by zero
+            
+            foreach (var snapshot in _poolStatHistory)
+            {
+                if (snapshot.timestamp < firstTimestamp)
+                    continue;
+                    
+                int total = snapshot.totalActive + snapshot.totalInactive;
+                if (total > maxValue)
+                    maxValue = total;
+            }
+            
+            // Account for small variations
+            maxValue = (int)(maxValue * 1.1f); 
+            
+            // Get points for active objects (green)
+            List<Vector2> activePoints = GetGraphPoints(rect, firstTimestamp, lastTimestamp, maxValue, 
+                snapshot => snapshot.totalActive);
+                
+            // Get points for total objects (active + inactive)
+            List<Vector2> totalPoints = GetGraphPoints(rect, firstTimestamp, lastTimestamp, maxValue, 
+                snapshot => snapshot.totalActive + snapshot.totalInactive);
+            
+            // Draw total (inactive + active) area
+            DrawGraphArea(totalPoints, new Color(0.7f, 0.2f, 0.2f, 0.5f));
+            
+            // Draw active objects area
+            DrawGraphArea(activePoints, new Color(0.2f, 0.7f, 0.2f, 0.5f));
+            
+            // Draw lines
+            DrawGraphLine(totalPoints, new Color(0.9f, 0.3f, 0.3f));
+            DrawGraphLine(activePoints, new Color(0.3f, 0.9f, 0.3f));
+            
+            // Draw legend
+            DrawGraphLegend(rect, new Dictionary<string, Color> {
+                { "Active Objects", new Color(0.3f, 0.9f, 0.3f) },
+                { "Inactive Objects", new Color(0.9f, 0.3f, 0.3f) }
+            }, maxValue);
+        }
+
+        /// <summary>
+        /// Draw operations graph showing get/return/instantiate operations
+        /// </summary>
+        private void DrawOperationsGraph(Rect rect)
+        {
+            // Get visible time range for graph
+            float lastTimestamp = _poolStatHistory[_poolStatHistory.Count - 1].timestamp;
+            float firstTimestamp = Mathf.Max(lastTimestamp - _historyTimeRange, _poolStatHistory[0].timestamp);
+            
+            // For operations, we need the delta between snapshots
+            Dictionary<float, int> getOps = new Dictionary<float, int>();
+            Dictionary<float, int> returnOps = new Dictionary<float, int>();
+            Dictionary<float, int> instantiateOps = new Dictionary<float, int>();
+            
+            int prevGet = 0;
+            int prevReturn = 0;
+            int prevInstantiate = 0;
+            
+            float maxValue = 1; // Default min scale
+            
+            foreach (var snapshot in _poolStatHistory)
+            {
+                if (snapshot.timestamp < firstTimestamp)
+                {
+                    // Just update previous values
+                    prevGet = snapshot.getCount;
+                    prevReturn = snapshot.returnCount;
+                    prevInstantiate = snapshot.instantiateCount;
+                    continue;
+                }
+                
+                // Calculate delta operations
+                int getDelta = snapshot.getCount - prevGet;
+                int returnDelta = snapshot.returnCount - prevReturn;
+                int instantiateDelta = snapshot.instantiateCount - prevInstantiate;
+                
+                getOps[snapshot.timestamp] = getDelta;
+                returnOps[snapshot.timestamp] = returnDelta;
+                instantiateOps[snapshot.timestamp] = instantiateDelta;
+                
+                // Update max for scaling
+                maxValue = Mathf.Max(maxValue, getDelta, returnDelta, instantiateDelta);
+                
+                // Update previous values
+                prevGet = snapshot.getCount;
+                prevReturn = snapshot.returnCount;
+                prevInstantiate = snapshot.instantiateCount;
+            }
+            
+            // Add headroom to max
+            maxValue *= 1.2f;
+            
+            // Draw the operation bar graphs
+            DrawOperationBars(rect, firstTimestamp, lastTimestamp, maxValue, 
+                getOps, returnOps, instantiateOps);
+                
+            // Draw legend
+            DrawGraphLegend(rect, new Dictionary<string, Color> {
+                { "Get Operations", new Color(0.3f, 0.7f, 0.9f) },
+                { "Return Operations", new Color(0.9f, 0.7f, 0.3f) },
+                { "New Instantiations", new Color(0.9f, 0.3f, 0.9f) }
+            }, (int)maxValue);
+        }
+
+        /// <summary>
+        /// Draw pool size graph showing total pool capacity vs objects in use
+        /// </summary>
+        private void DrawPoolSizeGraph(Rect rect)
+        {
+            // Get visible time range for graph
+            float lastTimestamp = _poolStatHistory[_poolStatHistory.Count - 1].timestamp;
+            float firstTimestamp = Mathf.Max(lastTimestamp - _historyTimeRange, _poolStatHistory[0].timestamp);
+            
+            // Find max value for scaling
+            int maxValue = 1; // Avoid division by zero
+            
+            foreach (var snapshot in _poolStatHistory)
+            {
+                if (snapshot.timestamp < firstTimestamp)
+                    continue;
+                    
+                int total = snapshot.totalActive + snapshot.totalInactive;
+                if (total > maxValue)
+                    maxValue = total;
+            }
+            
+            // Account for small variations
+            maxValue = (int)(maxValue * 1.2f); 
+            
+            // Get points for active objects
+            List<Vector2> activePoints = GetGraphPoints(rect, firstTimestamp, lastTimestamp, maxValue, 
+                snapshot => snapshot.totalActive);
+                
+            // Get points for total objects (active + inactive)
+            List<Vector2> totalPoints = GetGraphPoints(rect, firstTimestamp, lastTimestamp, maxValue, 
+                snapshot => snapshot.totalActive + snapshot.totalInactive);
+            
+            // Get points for max capacity (would need implementation)
+            // For now, this is estimated as total + some buffer (20%)
+            List<Vector2> capacityPoints = GetGraphPoints(rect, firstTimestamp, lastTimestamp, maxValue, 
+                snapshot => (int)((snapshot.totalActive + snapshot.totalInactive) * 1.2f));
+            
+            // Draw areas
+            DrawGraphArea(totalPoints, new Color(0.5f, 0.5f, 0.7f, 0.3f));
+            DrawGraphArea(activePoints, new Color(0.3f, 0.7f, 0.3f, 0.5f));
+            
+            // Draw lines
+            DrawGraphLine(capacityPoints, new Color(0.9f, 0.9f, 0.3f));
+            DrawGraphLine(totalPoints, new Color(0.5f, 0.5f, 0.9f));
+            DrawGraphLine(activePoints, new Color(0.3f, 0.9f, 0.3f));
+            
+            // Draw legend
+            DrawGraphLegend(rect, new Dictionary<string, Color> {
+                { "Active Objects", new Color(0.3f, 0.9f, 0.3f) },
+                { "Total Objects", new Color(0.5f, 0.5f, 0.9f) },
+                { "Maximum Capacity", new Color(0.9f, 0.9f, 0.3f) }
+            }, maxValue);
+        }
+
+        /// <summary>
+        /// Helper method to generate graph points from pool statistics
+        /// </summary>
+        private List<Vector2> GetGraphPoints(
+            Rect rect, float firstTimestamp, float lastTimestamp, 
+            float maxValue, Func<PoolStatSnapshot, float> valueSelector)
+        {
+            List<Vector2> points = new List<Vector2>();
+            float timeSpan = lastTimestamp - firstTimestamp;
+            
+            if (timeSpan <= 0)
+                return points;
+                
+            // Start with a point at the left edge
+            bool foundFirstPoint = false;
+            
+            foreach (var snapshot in _poolStatHistory)
+            {
+                if (snapshot.timestamp < firstTimestamp)
+                    continue;
+                    
+                // Calculate position
+                float x = rect.x + ((snapshot.timestamp - firstTimestamp) / timeSpan) * rect.width;
+                float normalizedValue = valueSelector(snapshot) / maxValue;
+                float y = rect.y + rect.height - (normalizedValue * rect.height);
+                
+                // Add left edge point if this is the first visible point
+                if (!foundFirstPoint)
+                {
+                    points.Add(new Vector2(rect.x, y));
+                    foundFirstPoint = true;
+                }
+                
+                points.Add(new Vector2(x, y));
+            }
+            
+            // Add an additional point at the right edge to complete the graph area
+            if (points.Count > 0)
+            {
+                points.Add(new Vector2(rect.x + rect.width, points[points.Count - 1].y));
+            }
+            
+            return points;
+        }
+
+        /// <summary>
+        /// Draw a filled area under a graph line
+        /// </summary>
+        private void DrawGraphArea(List<Vector2> points, Color color)
+        {
+            if (points.Count < 2) return;
+            
+            // Create a polygon by adding points at the bottom
+            List<Vector2> polygon = new List<Vector2>(points);
+            polygon.Add(new Vector2(points[points.Count - 1].x, points[0].y + 30)); // Bottom right
+            polygon.Add(new Vector2(points[0].x, points[0].y + 30)); // Bottom left
+            
+            // Convert Vector2[] to Vector3[] for Handles.DrawAAConvexPolygon
+            Vector3[] polygonV3 = polygon.Select(v => new Vector3(v.x, v.y, 0)).ToArray();
+            
+            // Draw filled area
+            Handles.BeginGUI();
+            Handles.color = color;
+            Handles.DrawAAConvexPolygon(polygonV3);
+            Handles.EndGUI();
+        }
+
+        /// <summary>
+        /// Draw a line connecting graph points
+        /// </summary>
+        private void DrawGraphLine(List<Vector2> points, Color color)
+        {
+            if (points.Count < 2) return;
+            
+            // Convert Vector2[] to Vector3[] for Handles.DrawAAPolyLine
+            Vector3[] pointsV3 = points.Select(v => new Vector3(v.x, v.y, 0)).ToArray();
+            
+            Handles.BeginGUI();
+            Handles.color = color;
+            Handles.DrawAAPolyLine(2.0f, pointsV3);
+            Handles.EndGUI();
+        }
+
+        /// <summary>
+        /// Draw legend for the graph
+        /// </summary>
+        private void DrawGraphLegend(Rect graphRect, Dictionary<string, Color> items, float maxValue)
+        {
+            float boxWidth = 120f;
+            float boxHeight = items.Count * 20f + 40f;
+            float boxX = graphRect.x + 10;
+            float boxY = graphRect.y + 10;
+            
+            // Draw semi-transparent background
+            EditorGUI.DrawRect(
+                new Rect(boxX, boxY, boxWidth, boxHeight), 
+                new Color(0.1f, 0.1f, 0.1f, 0.7f)
+            );
+            
+            // Draw max value
+            GUI.Label(
+                new Rect(boxX + 10, boxY + 10, boxWidth - 20, 20), 
+                $"Max: {maxValue:F0}",
+                new GUIStyle(EditorStyles.boldLabel) { normal = { textColor = Color.white } }
+            );
+            
+            // Draw items with color swatches
+            int i = 0;
+            foreach (var item in items)
+            {
+                float y = boxY + 30 + (i * 20);
+                
+                // Draw color swatch
+                EditorGUI.DrawRect(
+                    new Rect(boxX + 10, y + 3, 14, 14),
+                    item.Value
+                );
+                
+                // Draw label
+                GUI.Label(
+                    new Rect(boxX + 30, y, boxWidth - 40, 20),
+                    item.Key,
+                    new GUIStyle(EditorStyles.label) { normal = { textColor = Color.white } }
+                );
+                
+                i++;
+            }
+        }
+
+        /// <summary>
+        /// Draw operation bars for the Operations graph
+        /// </summary>
+        private void DrawOperationBars(
+            Rect rect, float firstTimestamp, float lastTimestamp, float maxValue,
+            Dictionary<float, int> getOps, Dictionary<float, int> returnOps, 
+            Dictionary<float, int> instantiateOps)
+        {
+            float timeSpan = lastTimestamp - firstTimestamp;
+            if (timeSpan <= 0) return;
+            
+            // Calculate bar sizing
+            int barCount = getOps.Count;
+            if (barCount == 0) return;
+            
+            float barWidth = Mathf.Min(10f, rect.width / barCount);
+            float barSpacing = (rect.width - (barWidth * barCount)) / (barCount + 1);
+            
+            // Colors
+            Color getColor = new Color(0.3f, 0.7f, 0.9f, 0.8f);
+            Color returnColor = new Color(0.9f, 0.7f, 0.3f, 0.8f);
+            Color instantiateColor = new Color(0.9f, 0.3f, 0.9f, 0.8f);
+            
+            // Draw bars for each timestamp
+            int index = 0;
+            foreach (var timestamp in getOps.Keys.OrderBy(t => t))
+            {
+                float x = rect.x + barSpacing + (index * (barWidth + barSpacing));
+                
+                // Get operation bar
+                if (getOps.TryGetValue(timestamp, out int getValue))
+                {
+                    float height = (getValue / maxValue) * rect.height;
+                    Rect barRect = new Rect(x, rect.y + rect.height - height, barWidth / 3, height);
+                    EditorGUI.DrawRect(barRect, getColor);
+                }
+                
+                // Return operation bar
+                if (returnOps.TryGetValue(timestamp, out int returnValue))
+                {
+                    float height = (returnValue / maxValue) * rect.height;
+                    Rect barRect = new Rect(x + barWidth/3, rect.y + rect.height - height, barWidth / 3, height);
+                    EditorGUI.DrawRect(barRect, returnColor);
+                }
+                
+                // Instantiate operation bar
+                if (instantiateOps.TryGetValue(timestamp, out int instantiateValue))
+                {
+                    float height = (instantiateValue / maxValue) * rect.height;
+                    Rect barRect = new Rect(x + 2*barWidth/3, rect.y + rect.height - height, barWidth / 3, height);
+                    EditorGUI.DrawRect(barRect, instantiateColor);
+                }
+                
+                index++;
+            }
+        }
     }
 }

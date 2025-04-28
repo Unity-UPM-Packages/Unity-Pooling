@@ -45,6 +45,10 @@ namespace com.thelegends.unity.pooling.Editor
         private bool _showInactiveObjects = true;
         private int _historyTimeRange = 60; // Default display 60s
         private bool _autoScrollToBottom = true;
+        
+        // Search functionality
+        private string _poolSearchString;
+        private Vector2 _poolListScrollPosition;
 
         /// <summary>
         /// Called when the window is enabled
@@ -138,13 +142,289 @@ namespace com.thelegends.unity.pooling.Editor
         /// </summary>
         private void CollectPoolData()
         {
-            // TODO: Implement data collection from PoolManager runtime
-            // Add a new snapshot to history
+            // Search for the PoolManager type in loaded assemblies
+            Type poolManagerType = null;
+            foreach (var assembly in AppDomain.CurrentDomain.GetAssemblies())
+            {
+                try
+                {
+                    var types = assembly.GetTypes();
+                    poolManagerType = types.FirstOrDefault(t => t.FullName == "com.thelegends.unity.pooling.PoolManager");
+                    if (poolManagerType != null)
+                        break;
+                }
+                catch (ReflectionTypeLoadException) 
+                {
+                    // Skip assemblies that can't be loaded
+                    continue;
+                }
+            }
+                
+            if (poolManagerType == null)
+            {
+                Debug.LogWarning("[PoolManagerEditor] Could not find PoolManager type. Make sure the assembly is loaded.");
+                return;
+            }
+            
+            // Get the instance property via reflection
+            var instanceProperty = poolManagerType.GetProperty("Instance", 
+                BindingFlags.Public | BindingFlags.Static | BindingFlags.FlattenHierarchy);
+                
+            if (instanceProperty == null)
+            {
+                Debug.LogWarning("[PoolManagerEditor] Could not find Instance property on PoolManager.");
+                return;
+            }
+            
+            var poolManager = instanceProperty.GetValue(null);
+            if (poolManager == null)
+            {
+                // No PoolManager instance exists yet, probably because no pools have been created
+                // Create an empty snapshot to avoid errors
+                var emptySnapshot = new PoolStatSnapshot
+                {
+                    timestamp = (float)EditorApplication.timeSinceStartup
+                };
+                _poolStatHistory.Add(emptySnapshot);
+                return;
+            }
+            
+            // Create a new snapshot
+            var snapshot = new PoolStatSnapshot
+            {
+                timestamp = (float)EditorApplication.timeSinceStartup,
+                poolStats = new Dictionary<string, PoolStats>(),
+                totalActive = 0,
+                totalInactive = 0,
+                getCount = 0,
+                returnCount = 0,
+                instantiateCount = 0
+            };
+            
+            // Get all pools via reflection
+            var getAllPoolsMethod = poolManagerType.GetMethod("GetAllPools", 
+                BindingFlags.Public | BindingFlags.Instance);
+                
+            // If GetAllPools doesn't exist, try to access the pools field/property directly
+            if (getAllPoolsMethod == null)
+            {
+                // First try to get _pools as a field
+                var poolsField = poolManagerType.GetField("_pools", BindingFlags.NonPublic | BindingFlags.Instance);
+                if (poolsField != null)
+                {
+                    var poolsDict = poolsField.GetValue(poolManager);
+                    if (poolsDict != null)
+                    {
+                        // Get the Values property of the dictionary
+                        var valuesProperty = poolsDict.GetType().GetProperty("Values");
+                        if (valuesProperty != null)
+                        {
+                            ProcessPools(valuesProperty.GetValue(poolsDict) as System.Collections.IEnumerable, snapshot);
+                        }
+                    }
+                }
+                else
+                {
+                    // If field doesn't exist, try to get Pools as a property
+                    var poolsProperty = poolManagerType.GetProperty("Pools", BindingFlags.Public | BindingFlags.Instance);
+                    if (poolsProperty != null)
+                    {
+                        var poolsDict = poolsProperty.GetValue(poolManager);
+                        if (poolsDict != null)
+                        {
+                            // Get the Values property of the dictionary
+                            var valuesProperty = poolsDict.GetType().GetProperty("Values");
+                            if (valuesProperty != null)
+                            {
+                                ProcessPools(valuesProperty.GetValue(poolsDict) as System.Collections.IEnumerable, snapshot);
+                            }
+                        }
+                    }
+                    else
+                    {
+                        Debug.LogWarning("[PoolManagerEditor] Could not find pools in PoolManager.");
+                        _poolStatHistory.Add(snapshot); // Add empty snapshot
+                    }
+                }
+            }
+            else
+            {
+                var allPools = getAllPoolsMethod.Invoke(poolManager, null) as System.Collections.IEnumerable;
+                if (allPools != null)
+                {
+                    ProcessPools(allPools, snapshot);
+                }
+                else
+                {
+                    _poolStatHistory.Add(snapshot); // Add empty snapshot
+                }
+            }
+            
+            // Add the snapshot to history
+            _poolStatHistory.Add(snapshot);
             
             // Limit history size to prevent memory leaks
             if (_poolStatHistory.Count > MAX_HISTORY_POINTS)
             {
                 _poolStatHistory.RemoveAt(0);
+            }
+        }
+
+        /// <summary>
+        /// Process each pool to gather statistics
+        /// </summary>
+        private void ProcessPools(System.Collections.IEnumerable allPools, PoolStatSnapshot snapshot)
+        {
+            if (allPools == null) return;
+            
+            // Process each pool
+            foreach (var pool in allPools)
+            {
+                // Get pool information via reflection
+                Type poolType = pool.GetType();
+                
+                // Get key/ID for the pool
+                string poolId = "unknown";
+                var keyProperty = poolType.GetProperty("Key");
+                if (keyProperty != null)
+                {
+                    var keyValue = keyProperty.GetValue(pool);
+                    if (keyValue != null)
+                    {
+                        poolId = keyValue.ToString();
+                    }
+                }
+                else
+                {
+                    var keyField = poolType.GetField("_key", BindingFlags.NonPublic | BindingFlags.Instance);
+                    if (keyField != null)
+                    {
+                        var keyValue = keyField.GetValue(pool);
+                        if (keyValue != null)
+                        {
+                            poolId = keyValue.ToString();
+                        }
+                    }
+                }
+                
+                // Check if this is a UI pool
+                bool isUIPool = poolType.Name.Contains("UIPool");
+                
+                // Get prefab name
+                string prefabName = "Unknown Prefab";
+                var prefabField = poolType.GetField("_prefab", BindingFlags.NonPublic | BindingFlags.Instance);
+                if (prefabField != null)
+                {
+                    var prefab = prefabField.GetValue(pool) as UnityEngine.Object;
+                    if (prefab != null)
+                    {
+                        prefabName = prefab.name;
+                    }
+                }
+                
+                // Get key statistics
+                int activeCount = GetValueFromPropertyOrField<int>(poolType, pool, "ActiveCount", "_activeCount");
+                int inactiveCount = GetValueFromPropertyOrField<int>(poolType, pool, "InactiveCount", "_inactiveCount");
+                int maxSize = GetValueFromPropertyOrField<int>(poolType, pool, "MaxSize", "_maxSize");
+                int instantiateCount = GetValueFromPropertyOrField<int>(poolType, pool, "InstantiateCount", "_instantiateCount");
+                int getCount = GetValueFromPropertyOrField<int>(poolType, pool, "GetCount", "_getCount");
+                int returnCount = GetValueFromPropertyOrField<int>(poolType, pool, "ReturnCount", "_returnCount");
+                
+                // Calculate efficiency (reuse ratio)
+                float efficiency = 0;
+                if (getCount > 0)
+                {
+                    efficiency = Mathf.Max(0, 1 - (float)instantiateCount / getCount);
+                }
+                
+                // Get all object details if available
+                List<ObjectStats> objectDetails = new List<ObjectStats>();
+                
+                // Try to access the _allObjects and _inactiveObjects collections
+                var allObjectsField = poolType.GetField("_allObjects", BindingFlags.NonPublic | BindingFlags.Instance);
+                var inactiveObjectsField = poolType.GetField("_inactiveObjects", BindingFlags.NonPublic | BindingFlags.Instance);
+                
+                if (allObjectsField != null && inactiveObjectsField != null)
+                {
+                    var allObjects = allObjectsField.GetValue(pool) as System.Collections.IList;
+                    var inactiveObjects = inactiveObjectsField.GetValue(pool) as System.Collections.ICollection;
+                    
+                    if (allObjects != null && inactiveObjects != null)
+                    {
+                        // Get inactive object IDs into a HashSet for fast lookup
+                        HashSet<int> inactiveIds = new HashSet<int>();
+                        foreach (GameObject inactiveObj in inactiveObjects)
+                        {
+                            if (inactiveObj != null)
+                            {
+                                inactiveIds.Add(inactiveObj.GetInstanceID());
+                            }
+                        }
+                        
+                        // Process all objects
+                        foreach (GameObject obj in allObjects)
+                        {
+                            if (obj != null)
+                            {
+                                int instanceId = obj.GetInstanceID();
+                                bool isActive = !inactiveIds.Contains(instanceId);
+                                
+                                // Calculate inactive time if we can find the _lastAccessTime field on the object
+                                float inactiveTime = 0;
+                                if (!isActive)
+                                {
+                                    var pooledObjComponent = obj.GetComponent("PooledObject");
+                                    if (pooledObjComponent != null)
+                                    {
+                                        var lastAccessField = pooledObjComponent.GetType().GetField("_lastAccessTime", 
+                                            BindingFlags.NonPublic | BindingFlags.Instance);
+                                        
+                                        if (lastAccessField != null)
+                                        {
+                                            float lastAccessTime = (float)lastAccessField.GetValue(pooledObjComponent);
+                                            inactiveTime = Time.time - lastAccessTime;
+                                        }
+                                    }
+                                }
+                                
+                                // Add object stats to the list
+                                objectDetails.Add(new ObjectStats
+                                {
+                                    instanceId = instanceId,
+                                    isActive = isActive,
+                                    inactiveTime = inactiveTime,
+                                    position = obj.transform.position
+                                });
+                            }
+                        }
+                    }
+                }
+                
+                // Create pool stats object
+                var poolStats = new PoolStats
+                {
+                    poolId = poolId,
+                    prefabName = prefabName,
+                    isUIPool = isUIPool,
+                    activeCount = activeCount,
+                    inactiveCount = inactiveCount,
+                    maxSize = maxSize,
+                    instantiateCount = instantiateCount,
+                    getCount = getCount,
+                    returnCount = returnCount,
+                    efficiency = efficiency,
+                    objectStats = objectDetails
+                };
+                
+                // Add to snapshot
+                snapshot.poolStats[poolId] = poolStats;
+                
+                // Add to totals
+                snapshot.totalActive += activeCount;
+                snapshot.totalInactive += inactiveCount;
+                snapshot.instantiateCount += instantiateCount;
+                snapshot.getCount += getCount;
+                snapshot.returnCount += returnCount;
             }
         }
 
@@ -227,19 +507,30 @@ namespace com.thelegends.unity.pooling.Editor
         /// </summary>
         private void DrawDashboard()
         {
-            // Title
+            // Dashboard header with refresh button
+            EditorGUILayout.BeginHorizontal();
             EditorGUILayout.LabelField("Object Pooling Dashboard", EditorStyles.boldLabel);
-            EditorGUILayout.Space();
+            GUILayout.FlexibleSpace();
             
-            // System-wide statistics
+            if (GUILayout.Button(new GUIContent("Refresh", "Force refresh pool data"), GUILayout.Width(80)))
+            {
+                CollectPoolData();
+                Repaint();
+            }
+            
+            EditorGUILayout.EndHorizontal();
+            
+            EditorGUILayout.Space(10);
+            
+            // System-wide statistics section
             DrawSystemStats();
-            EditorGUILayout.Space();
+            EditorGUILayout.Space(10);
             
-            // Activity graph
+            // Activity graphs section
             DrawActivityGraphs();
-            EditorGUILayout.Space();
+            EditorGUILayout.Space(10);
             
-            // List of pools
+            // List of all pools
             DrawPoolsList();
         }
         
@@ -439,54 +730,159 @@ namespace com.thelegends.unity.pooling.Editor
         }
         
         /// <summary>
-        /// Draw list of all pools
+        /// Draw list of all pools with summary information
         /// </summary>
         private void DrawPoolsList()
         {
-            // TODO: Implement pools list
             EditorGUILayout.BeginVertical(EditorStyles.helpBox);
-            EditorGUILayout.LabelField("Pools", EditorStyles.boldLabel);
             
-            // Headers
+            // Header with search box
+            EditorGUILayout.BeginHorizontal();
+            EditorGUILayout.LabelField("Pool Inventory", EditorStyles.boldLabel, GUILayout.Width(100));
+            
+            // Search functionality
+            GUILayout.FlexibleSpace();
+            EditorGUILayout.LabelField("Search:", GUILayout.Width(50));
+            _poolSearchString = EditorGUILayout.TextField(_poolSearchString ?? "", GUILayout.Width(150));
+            if (GUILayout.Button("×", GUILayout.Width(20)))
+            {
+                _poolSearchString = "";
+                GUI.FocusControl(null);
+            }
+            EditorGUILayout.EndHorizontal();
+            
+            EditorGUILayout.Space(5);
+            
+            // Column headers
             EditorGUILayout.BeginHorizontal(EditorStyles.toolbar);
+            EditorGUILayout.LabelField("", GUILayout.Width(28)); // Selection column
             EditorGUILayout.LabelField("Pool Name", EditorStyles.toolbarButton, GUILayout.Width(150));
-            EditorGUILayout.LabelField("Type", EditorStyles.toolbarButton, GUILayout.Width(80));
-            EditorGUILayout.LabelField("Active", EditorStyles.toolbarButton, GUILayout.Width(60));
-            EditorGUILayout.LabelField("Inactive", EditorStyles.toolbarButton, GUILayout.Width(60));
-            EditorGUILayout.LabelField("Total", EditorStyles.toolbarButton, GUILayout.Width(60));
-            EditorGUILayout.LabelField("Efficiency", EditorStyles.toolbarButton, GUILayout.Width(100));
+            EditorGUILayout.LabelField("Type", EditorStyles.toolbarButton, GUILayout.Width(70));
+            EditorGUILayout.LabelField("Active", EditorStyles.toolbarButton, GUILayout.Width(50));
+            EditorGUILayout.LabelField("Inactive", EditorStyles.toolbarButton, GUILayout.Width(50));
+            EditorGUILayout.LabelField("Total", EditorStyles.toolbarButton, GUILayout.Width(50));
+            EditorGUILayout.LabelField("Efficiency", EditorStyles.toolbarButton, GUILayout.Width(110));
             EditorGUILayout.LabelField("Get Ops", EditorStyles.toolbarButton, GUILayout.Width(60));
-            EditorGUILayout.LabelField("Return Ops", EditorStyles.toolbarButton, GUILayout.Width(80));
-            EditorGUILayout.LabelField("", EditorStyles.toolbarButton);
+            EditorGUILayout.LabelField("Return Ops", EditorStyles.toolbarButton, GUILayout.Width(70));
+            EditorGUILayout.LabelField("", EditorStyles.toolbarButton); // For action buttons column
             EditorGUILayout.EndHorizontal();
             
-            // Draw placeholder row for demonstration - Fixed version
-            bool selected = _selectedPoolId == "example_pool";
+            // Get the most recent snapshot
+            PoolStatSnapshot latestSnapshot = _poolStatHistory.Count > 0 
+                ? _poolStatHistory[_poolStatHistory.Count - 1] 
+                : new PoolStatSnapshot();
             
-            EditorGUILayout.BeginHorizontal(selected ? EditorStyles.helpBox : EditorStyles.label);
-            
-            // Toggle selection on click (simulating the toggle group behavior)
-            bool newSelected = EditorGUILayout.Toggle(selected, GUILayout.Width(20));
-            if (newSelected != selected && newSelected)
+            // Draw pool list items
+            if (latestSnapshot.poolStats != null && latestSnapshot.poolStats.Count > 0)
             {
-                _selectedPoolId = "example_pool";
-                _currentTab = Tab.PoolDetails;
+                // Use a scrollable list for many pools
+                _poolListScrollPosition = EditorGUILayout.BeginScrollView(_poolListScrollPosition, 
+                    GUILayout.ExpandHeight(true), GUILayout.MaxHeight(300));
+                
+                // Filter by search if needed
+                var filteredPools = string.IsNullOrEmpty(_poolSearchString) 
+                    ? latestSnapshot.poolStats 
+                    : latestSnapshot.poolStats.Where(p => 
+                        p.Key.IndexOf(_poolSearchString, StringComparison.OrdinalIgnoreCase) >= 0 || 
+                        p.Value.prefabName.IndexOf(_poolSearchString, StringComparison.OrdinalIgnoreCase) >= 0);
+                
+                // Draw each pool row
+                foreach (var poolEntry in filteredPools)
+                {
+                    string poolId = poolEntry.Key;
+                    PoolStats stats = poolEntry.Value;
+                    bool selected = _selectedPoolId == poolId;
+                    
+                    EditorGUILayout.BeginHorizontal(selected ? 
+                        new GUIStyle { normal = { background = EditorGUIUtility.whiteTexture } } : new GUIStyle());
+                    
+                    // Apply tint to selected row
+                    if (selected)
+                    {
+                        GUI.color = new Color(0.8f, 0.9f, 1f);
+                    }
+                    
+                    // Toggle selection
+                    bool newSelected = EditorGUILayout.Toggle(selected, GUILayout.Width(20));
+                    if (newSelected != selected)
+                    {
+                        _selectedPoolId = newSelected ? poolId : null;
+                        
+                        // Switch to details tab if selecting a pool
+                        if (newSelected)
+                        {
+                            _currentTab = Tab.PoolDetails;
+                        }
+                    }
+                    
+                    // Pool name - make it clickable
+                    if (GUILayout.Button(stats.prefabName, new GUIStyle(EditorStyles.label) { alignment = TextAnchor.MiddleLeft }, GUILayout.Width(150)))
+                    {
+                        _selectedPoolId = poolId;
+                        _currentTab = Tab.PoolDetails;
+                    }
+                    
+                    // Pool type
+                    EditorGUILayout.LabelField(stats.isUIPool ? "UI" : "Regular", GUILayout.Width(70));
+                    
+                    // Active/Inactive/Total counts
+                    EditorGUILayout.LabelField(stats.activeCount.ToString(), GUILayout.Width(50));
+                    EditorGUILayout.LabelField(stats.inactiveCount.ToString(), GUILayout.Width(50));
+                    EditorGUILayout.LabelField((stats.activeCount + stats.inactiveCount).ToString(), GUILayout.Width(50));
+                    
+                    // Efficiency bar
+                    Rect barRect = GUILayoutUtility.GetRect(100, 16, GUILayout.Width(100));
+                    EditorGUI.DrawRect(barRect, new Color(0.3f, 0.3f, 0.3f));
+                    
+                    // Calculate efficiency
+                    float efficiency = stats.efficiency;
+                    
+                    // Color based on efficiency
+                    Color barColor = Color.Lerp(Color.red, Color.green, efficiency);
+                    
+                    // Draw efficiency bar
+                    EditorGUI.DrawRect(
+                        new Rect(barRect.x, barRect.y, barRect.width * efficiency, barRect.height),
+                        barColor
+                    );
+                    
+                    // Draw efficiency percentage text
+                    string efficiencyText = $"{efficiency * 100:0}%";
+                    EditorGUI.LabelField(
+                        barRect, 
+                        efficiencyText,
+                        new GUIStyle(EditorStyles.miniBoldLabel) { 
+                            alignment = TextAnchor.MiddleCenter,
+                            normal = { textColor = Color.white }
+                        }
+                    );
+                    
+                    // Operation counts
+                    EditorGUILayout.LabelField(stats.getCount.ToString(), GUILayout.Width(60));
+                    EditorGUILayout.LabelField(stats.returnCount.ToString(), GUILayout.Width(70));
+                    
+                    // Action buttons
+                    if (GUILayout.Button("Details", GUILayout.Width(60)))
+                    {
+                        _selectedPoolId = poolId;
+                        _currentTab = Tab.PoolDetails;
+                    }
+                    
+                    // Reset color
+                    GUI.color = Color.white;
+                    
+                    EditorGUILayout.EndHorizontal();
+                }
+                
+                EditorGUILayout.EndScrollView();
             }
-            
-            EditorGUILayout.LabelField("Example Pool", GUILayout.Width(130));
-            EditorGUILayout.LabelField("Regular", GUILayout.Width(80));
-            EditorGUILayout.LabelField("10", GUILayout.Width(60));
-            EditorGUILayout.LabelField("20", GUILayout.Width(60));
-            EditorGUILayout.LabelField("30", GUILayout.Width(60));
-            EditorGUILayout.LabelField("75%", GUILayout.Width(100));
-            EditorGUILayout.LabelField("50", GUILayout.Width(60));
-            EditorGUILayout.LabelField("40", GUILayout.Width(80));
-            if (GUILayout.Button("Details", GUILayout.Width(60)))
+            else
             {
-                _selectedPoolId = "example_pool";
-                _currentTab = Tab.PoolDetails;
+                // No pools available
+                EditorGUILayout.Space(10);
+                EditorGUILayout.HelpBox("No pools have been created yet.", MessageType.Info);
+                EditorGUILayout.Space(10);
             }
-            EditorGUILayout.EndHorizontal();
             
             EditorGUILayout.EndVertical();
         }
@@ -924,6 +1320,43 @@ namespace com.thelegends.unity.pooling.Editor
             EditorGUILayout.LabelField(value, EditorStyles.boldLabel);
             EditorGUILayout.EndHorizontal();
         }
+
+        /// <summary>
+        /// Helper method to get a value from either a property or a field via reflection
+        /// </summary>
+        private T GetValueFromPropertyOrField<T>(Type type, object obj, string propertyName, string fieldName)
+        {
+            // Check for property first
+            var property = type.GetProperty(propertyName);
+            if (property != null)
+            {
+                try
+                {
+                    return (T)Convert.ChangeType(property.GetValue(obj), typeof(T));
+                }
+                catch
+                {
+                    return default(T);
+                }
+            }
+            
+            // Then check for field
+            var field = type.GetField(fieldName, BindingFlags.NonPublic | BindingFlags.Instance);
+            if (field != null)
+            {
+                try
+                {
+                    return (T)Convert.ChangeType(field.GetValue(obj), typeof(T));
+                }
+                catch
+                {
+                    return default(T);
+                }
+            }
+            
+            // Return default if not found
+            return default(T);
+        }
         #endregion
 
         /// <summary>
@@ -979,8 +1412,8 @@ namespace com.thelegends.unity.pooling.Editor
         private void DrawObjectsGraph(Rect rect)
         {
             // Get visible time range for graph
-            float lastTimestamp = _poolStatHistory[_poolStatHistory.Count - 1].timestamp;
-            float firstTimestamp = Mathf.Max(lastTimestamp - _historyTimeRange, _poolStatHistory[0].timestamp);
+            float lastTimestamp = _poolStatHistory.Count > 0 ? _poolStatHistory[_poolStatHistory.Count - 1].timestamp : 0;
+            float firstTimestamp = Mathf.Max(lastTimestamp - _historyTimeRange, _poolStatHistory.Count > 0 ? _poolStatHistory[0].timestamp : 0);
             
             // Find max value for scaling
             int maxValue = 1; // Avoid division by zero
@@ -995,7 +1428,7 @@ namespace com.thelegends.unity.pooling.Editor
                     maxValue = total;
             }
             
-            // Account for small variations
+            // Add headroom for better visualization
             maxValue = (int)(maxValue * 1.1f); 
             
             // Get points for active objects (green)
@@ -1006,20 +1439,27 @@ namespace com.thelegends.unity.pooling.Editor
             List<Vector2> totalPoints = GetGraphPoints(rect, firstTimestamp, lastTimestamp, maxValue, 
                 snapshot => snapshot.totalActive + snapshot.totalInactive);
             
-            // Draw total (inactive + active) area
-            DrawGraphArea(totalPoints, new Color(0.7f, 0.2f, 0.2f, 0.5f));
+            // Get points for inactive objects (red) by converting from total and active
+            List<Vector2> inactivePoints = new List<Vector2>();
+            if (totalPoints.Count > 0 && activePoints.Count > 0)
+            {
+                for (int i = 0; i < totalPoints.Count && i < activePoints.Count; i++)
+                {
+                    // Use the same x coordinate, but calculate y as the difference between total and active
+                    float x = totalPoints[i].x;
+                    float y = activePoints[i].y - (totalPoints[i].y - activePoints[i].y);
+                    inactivePoints.Add(new Vector2(x, y));
+                }
+            }
             
-            // Draw active objects area
-            DrawGraphArea(activePoints, new Color(0.2f, 0.7f, 0.2f, 0.5f));
-            
-            // Draw lines
-            DrawGraphLine(totalPoints, new Color(0.9f, 0.3f, 0.3f));
-            DrawGraphLine(activePoints, new Color(0.3f, 0.9f, 0.3f));
+            // Draw the lines with appropriate thickness
+            DrawGraphLine(totalPoints, new Color(0.7f, 0.2f, 0.2f), 2.0f); // Total line (red)
+            DrawGraphLine(activePoints, new Color(0.2f, 0.7f, 0.2f), 2.0f); // Active line (green)
             
             // Draw legend
             DrawGraphLegend(rect, new Dictionary<string, Color> {
-                { "Active Objects", new Color(0.3f, 0.9f, 0.3f) },
-                { "Inactive Objects", new Color(0.9f, 0.3f, 0.3f) }
+                { "Active Objects", new Color(0.2f, 0.7f, 0.2f) },
+                { "Total Pool Size", new Color(0.7f, 0.2f, 0.2f) }
             }, maxValue);
         }
 
@@ -1029,8 +1469,8 @@ namespace com.thelegends.unity.pooling.Editor
         private void DrawOperationsGraph(Rect rect)
         {
             // Get visible time range for graph
-            float lastTimestamp = _poolStatHistory[_poolStatHistory.Count - 1].timestamp;
-            float firstTimestamp = Mathf.Max(lastTimestamp - _historyTimeRange, _poolStatHistory[0].timestamp);
+            float lastTimestamp = _poolStatHistory.Count > 0 ? _poolStatHistory[_poolStatHistory.Count - 1].timestamp : 0;
+            float firstTimestamp = Mathf.Max(lastTimestamp - _historyTimeRange, _poolStatHistory.Count > 0 ? _poolStatHistory[0].timestamp : 0);
             
             // For operations, we need the delta between snapshots
             Dictionary<float, int> getOps = new Dictionary<float, int>();
@@ -1043,28 +1483,34 @@ namespace com.thelegends.unity.pooling.Editor
             
             float maxValue = 1; // Default min scale
             
+            // Prepare points for our line graphs
+            List<Vector2> getPoints = new List<Vector2>();
+            List<Vector2> returnPoints = new List<Vector2>();
+            List<Vector2> instantiatePoints = new List<Vector2>();
+            
+            // Add first point at left edge with zeros
+            Vector2 leftEdgePoint = new Vector2(rect.x, rect.y + rect.height);
+            getPoints.Add(leftEdgePoint);
+            returnPoints.Add(leftEdgePoint);
+            instantiatePoints.Add(leftEdgePoint);
+            
             foreach (var snapshot in _poolStatHistory)
             {
                 if (snapshot.timestamp < firstTimestamp)
-                {
-                    // Just update previous values
-                    prevGet = snapshot.getCount;
-                    prevReturn = snapshot.returnCount;
-                    prevInstantiate = snapshot.instantiateCount;
                     continue;
-                }
                 
                 // Calculate delta operations
                 int getDelta = snapshot.getCount - prevGet;
                 int returnDelta = snapshot.returnCount - prevReturn;
                 int instantiateDelta = snapshot.instantiateCount - prevInstantiate;
                 
+                // Keep track of max value for scaling
+                maxValue = Mathf.Max(maxValue, getDelta, returnDelta, instantiateDelta);
+                
+                // Store values for visualization
                 getOps[snapshot.timestamp] = getDelta;
                 returnOps[snapshot.timestamp] = returnDelta;
                 instantiateOps[snapshot.timestamp] = instantiateDelta;
-                
-                // Update max for scaling
-                maxValue = Mathf.Max(maxValue, getDelta, returnDelta, instantiateDelta);
                 
                 // Update previous values
                 prevGet = snapshot.getCount;
@@ -1072,18 +1518,64 @@ namespace com.thelegends.unity.pooling.Editor
                 prevInstantiate = snapshot.instantiateCount;
             }
             
-            // Add headroom to max
+            // Add headroom to max value for better visualization
             maxValue *= 1.2f;
             
-            // Draw the operation bar graphs
-            DrawOperationBars(rect, firstTimestamp, lastTimestamp, maxValue, 
-                getOps, returnOps, instantiateOps);
-                
+            // Convert operation deltas to graph points
+            float timeSpan = lastTimestamp - firstTimestamp;
+            if (timeSpan > 0)
+            {
+                foreach (var timestamp in getOps.Keys.OrderBy(t => t))
+                {
+                    float x = rect.x + ((timestamp - firstTimestamp) / timeSpan) * rect.width;
+                    
+                    // Get operations (blue)
+                    if (getOps.TryGetValue(timestamp, out int getValue))
+                    {
+                        float normalizedValue = getValue / maxValue;
+                        float y = rect.y + rect.height - (normalizedValue * rect.height);
+                        getPoints.Add(new Vector2(x, y));
+                    }
+                    
+                    // Return operations (orange)
+                    if (returnOps.TryGetValue(timestamp, out int returnValue))
+                    {
+                        float normalizedValue = returnValue / maxValue;
+                        float y = rect.y + rect.height - (normalizedValue * rect.height);
+                        returnPoints.Add(new Vector2(x, y));
+                    }
+                    
+                    // Instantiate operations (purple)
+                    if (instantiateOps.TryGetValue(timestamp, out int instantiateValue))
+                    {
+                        float normalizedValue = instantiateValue / maxValue;
+                        float y = rect.y + rect.height - (normalizedValue * rect.height);
+                        instantiatePoints.Add(new Vector2(x, y));
+                    }
+                }
+            }
+            
+            // Add right edge point
+            Vector2 rightEdgePoint = new Vector2(rect.x + rect.width, rect.y + rect.height);
+            getPoints.Add(rightEdgePoint);
+            returnPoints.Add(rightEdgePoint);
+            instantiatePoints.Add(rightEdgePoint);
+            
+            // Draw each line with appropriate colors and thicknesses
+            Color getColor = new Color(0.3f, 0.7f, 0.9f); // Blue
+            Color returnColor = new Color(0.9f, 0.7f, 0.3f); // Orange
+            Color instantiateColor = new Color(0.9f, 0.3f, 0.9f); // Purple
+            
+            // Draw the lines
+            DrawGraphLine(getPoints, getColor, 2.0f);
+            DrawGraphLine(returnPoints, returnColor, 2.0f);
+            DrawGraphLine(instantiatePoints, instantiateColor, 2.0f);
+            
             // Draw legend
             DrawGraphLegend(rect, new Dictionary<string, Color> {
-                { "Get Operations", new Color(0.3f, 0.7f, 0.9f) },
-                { "Return Operations", new Color(0.9f, 0.7f, 0.3f) },
-                { "New Instantiations", new Color(0.9f, 0.3f, 0.9f) }
+                { "Get Operations", getColor },
+                { "Return Operations", returnColor },
+                { "New Instantiations", instantiateColor }
             }, (int)maxValue);
         }
 
@@ -1093,8 +1585,8 @@ namespace com.thelegends.unity.pooling.Editor
         private void DrawPoolSizeGraph(Rect rect)
         {
             // Get visible time range for graph
-            float lastTimestamp = _poolStatHistory[_poolStatHistory.Count - 1].timestamp;
-            float firstTimestamp = Mathf.Max(lastTimestamp - _historyTimeRange, _poolStatHistory[0].timestamp);
+            float lastTimestamp = _poolStatHistory.Count > 0 ? _poolStatHistory[_poolStatHistory.Count - 1].timestamp : 0;
+            float firstTimestamp = Mathf.Max(lastTimestamp - _historyTimeRange, _poolStatHistory.Count > 0 ? _poolStatHistory[0].timestamp : 0);
             
             // Find max value for scaling
             int maxValue = 1; // Avoid division by zero
@@ -1105,34 +1597,31 @@ namespace com.thelegends.unity.pooling.Editor
                     continue;
                     
                 int total = snapshot.totalActive + snapshot.totalInactive;
-                if (total > maxValue)
-                    maxValue = total;
+                // Estimated capacity (total + 20%)
+                int estimatedCapacity = (int)(total * 1.2f);
+                if (estimatedCapacity > maxValue)
+                    maxValue = estimatedCapacity;
             }
             
-            // Account for small variations
-            maxValue = (int)(maxValue * 1.2f); 
+            // Add some headroom for better visualization
+            maxValue = (int)(maxValue * 1.1f);
             
-            // Get points for active objects
+            // Get points for active objects (green)
             List<Vector2> activePoints = GetGraphPoints(rect, firstTimestamp, lastTimestamp, maxValue, 
                 snapshot => snapshot.totalActive);
                 
-            // Get points for total objects (active + inactive)
+            // Get points for total objects (blue) - active + inactive
             List<Vector2> totalPoints = GetGraphPoints(rect, firstTimestamp, lastTimestamp, maxValue, 
                 snapshot => snapshot.totalActive + snapshot.totalInactive);
             
-            // Get points for max capacity (would need implementation)
-            // For now, this is estimated as total + some buffer (20%)
+            // Get points for capacity (yellow) - estimated max size
             List<Vector2> capacityPoints = GetGraphPoints(rect, firstTimestamp, lastTimestamp, maxValue, 
                 snapshot => (int)((snapshot.totalActive + snapshot.totalInactive) * 1.2f));
             
-            // Draw areas
-            DrawGraphArea(totalPoints, new Color(0.5f, 0.5f, 0.7f, 0.3f));
-            DrawGraphArea(activePoints, new Color(0.3f, 0.7f, 0.3f, 0.5f));
-            
-            // Draw lines
-            DrawGraphLine(capacityPoints, new Color(0.9f, 0.9f, 0.3f));
-            DrawGraphLine(totalPoints, new Color(0.5f, 0.5f, 0.9f));
-            DrawGraphLine(activePoints, new Color(0.3f, 0.9f, 0.3f));
+            // Draw the lines with appropriate thickness
+            DrawGraphLine(capacityPoints, new Color(0.9f, 0.9f, 0.3f), 1.5f); // Capacity line (yellow)
+            DrawGraphLine(totalPoints, new Color(0.5f, 0.5f, 0.9f), 2.0f); // Total line (blue)
+            DrawGraphLine(activePoints, new Color(0.3f, 0.9f, 0.3f), 2.0f); // Active line (green)
             
             // Draw legend
             DrawGraphLegend(rect, new Dictionary<string, Color> {
@@ -1178,11 +1667,9 @@ namespace com.thelegends.unity.pooling.Editor
                 points.Add(new Vector2(x, y));
             }
             
-            // Add an additional point at the right edge to complete the graph area
-            if (points.Count > 0)
-            {
-                points.Add(new Vector2(rect.x + rect.width, points[points.Count - 1].y));
-            }
+            // Add right edge point
+            Vector2 rightEdgePoint = new Vector2(rect.x + rect.width, rect.y + rect.height);
+            points.Add(rightEdgePoint);
             
             return points;
         }
@@ -1212,7 +1699,7 @@ namespace com.thelegends.unity.pooling.Editor
         /// <summary>
         /// Draw a line connecting graph points
         /// </summary>
-        private void DrawGraphLine(List<Vector2> points, Color color)
+        private void DrawGraphLine(List<Vector2> points, Color color, float thickness = 1.0f)
         {
             if (points.Count < 2) return;
             
@@ -1221,7 +1708,7 @@ namespace com.thelegends.unity.pooling.Editor
             
             Handles.BeginGUI();
             Handles.color = color;
-            Handles.DrawAAPolyLine(2.0f, pointsV3);
+            Handles.DrawAAPolyLine(thickness, pointsV3);
             Handles.EndGUI();
         }
 

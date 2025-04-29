@@ -445,7 +445,7 @@ MonoBehaviour:
   m_Name: 
   m_EditorClassIdentifier: 
   objectPrefab: {fileID: 5740668457149290695, guid: b1ae05158535c6641ae9db33a0519417, type: 3}
-  spawnInterval: 5
+  spawnInterval: 0.02
   poolKey: SpherePool
 --- !u!4 &452556634
 Transform:

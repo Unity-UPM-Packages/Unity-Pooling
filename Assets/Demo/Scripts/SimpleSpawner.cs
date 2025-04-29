@@ -34,7 +34,7 @@ public class SimpleSpawner : MonoBehaviour
             maxSize = 300
         };
         // Sử dụng prefab trực tiếp thay vì Addressables cho đơn giản
-        await poolManager.CreatePoolAsync(poolKey, config);
+        await poolManager.CreatePoolAsync(poolKey, PoolConfig.Default, AddressableErrorConfig.Default, PoolTrimmingConfig.Default);
         #else
         Debug.LogWarning("Pooling is Disabled (OBJECT_POOLING symbol not defined). Using Instantiate/Destroy.");
         usePooling = false; // Buộc không dùng pooling nếu symbol không được định nghĩa

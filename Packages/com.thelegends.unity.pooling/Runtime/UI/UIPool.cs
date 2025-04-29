@@ -83,6 +83,7 @@ namespace com.thelegends.unity.pooling
             // Set the parent transform with appropriate maintain settings
             if (_parentTransform != null)
             {
+                // When getting from pool, move from container to the target parent
                 if (_preserveOriginalParenting)
                 {
                     rectTransform.SetParent(_parentTransform, false);
@@ -193,9 +194,14 @@ namespace com.thelegends.unity.pooling
             if (transform == null)
                 return;
                 
-            // If we have a specific parent, detach from current parent and attach to pool parent
-            if (_parentTransform != null)
+            // Return it to our container instead of the UI parent when returning to pool
+            if (_parentContainer != null)
             {
+                transform.SetParent(_parentContainer.transform, false);
+            }
+            else if (_parentTransform != null) 
+            {
+                // Fallback to UI parent if we don't have a container
                 transform.SetParent(_parentTransform, false);
             }
             else
@@ -305,4 +311,4 @@ namespace com.thelegends.unity.pooling
             return component;
         }
     }
-} 
+}

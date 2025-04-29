@@ -1,15 +1,15 @@
 using UnityEngine;
-using System.Collections; // Cần cho IEnumerator
-using com.thelegends.unity.pooling; // Thay bằng namespace thực tế của thư viện pooling
+using System.Collections; 
+using com.thelegends.unity.pooling;
 
 public class SimpleSpawner : MonoBehaviour
 {
-    public GameObject objectPrefab; // Kéo PooledSpherePrefab vào đây
-    public float spawnInterval = 0.1f; // Tần suất spawn
+    public GameObject objectPrefab;
+    public float spawnInterval = 0.1f;
     public string poolKey = "SpherePool";
 
     private PoolManager poolManager;
-    private bool usePooling = true; // Biến để chuyển đổi chế độ
+    private bool usePooling = true;
 
     async void Start()
     {
@@ -23,16 +23,10 @@ public class SimpleSpawner : MonoBehaviour
         poolManager = PoolManager.Instance;
 
         // --- Cấu hình Pool ---
-        // Chỉ tạo pool nếu dùng chế độ pooling
-        // Kế hoạch 7.0 có symbol OBJECT_POOLING, nhưng ở đây ta dùng biến bool cho dễ demo
-        #if OBJECT_POOLING // Giả sử bạn có symbol này theo kế hoạch
-        Debug.Log("Pooling is Enabled via Symbol.");
-        // Sử dụng prefab trực tiếp thay vì Addressables cho đơn giản
+        // Thư viện luôn sử dụng pooling
         await poolManager.CreatePoolAsync(poolKey, PoolConfig.ExceedMaxSizeConfig(10, true, 100), AddressableErrorConfig.Default, PoolTrimmingConfig.Default);
-        #else
-        Debug.LogWarning("Pooling is Disabled (OBJECT_POOLING symbol not defined). Using Instantiate/Destroy.");
-        usePooling = false; // Buộc không dùng pooling nếu symbol không được định nghĩa
-        #endif
+
+        Debug.Log("Pooling is Enabled and initialized.");
 
         // Bắt đầu coroutine spawn
         StartCoroutine(SpawnRoutine());
@@ -72,7 +66,6 @@ public class SimpleSpawner : MonoBehaviour
     // Hàm async riêng để lấy object từ pool
     async System.Threading.Tasks.Task GetPooledObjectAsync(Vector3 position)
     {
-#if OBJECT_POOLING
         GameObject pooledObject = await poolManager.GetAsync(poolKey);
         if (pooledObject != null)
         {
@@ -82,23 +75,13 @@ public class SimpleSpawner : MonoBehaviour
             // Chỉ cần đặt vị trí và rotation
             pooledObject.transform.position = position;
             pooledObject.transform.rotation = Quaternion.identity;
-
         }
-#else
-            // Không làm gì nếu pooling bị tắt
-            await System.Threading.Tasks.Task.CompletedTask;
-#endif
     }
 
     // --- Hàm để gọi từ UI Button (Tùy chọn) ---
     public void SetPoolingMode(bool poolingEnabled)
     {
-        #if OBJECT_POOLING
         usePooling = poolingEnabled;
         Debug.Log("Switched to " + (usePooling ? "Pooling" : "Instantiate/Destroy") + " mode.");
-        #else
-        usePooling = false; // Luôn là false nếu symbol không được định nghĩa
-        Debug.LogWarning("Cannot enable pooling because OBJECT_POOLING symbol is not defined. Staying in Instantiate/Destroy mode.");
-        #endif
     }
 }

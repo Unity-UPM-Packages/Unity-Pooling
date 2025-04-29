@@ -73,7 +73,7 @@ Chắc chắn rồi! Đây là bản Kế hoạch Phát triển Object Pooling p
 *   **`AddressableErrorConfig` Struct:** Chứa `errorHandlingStrategy`, `GameObject fallbackPrefab`, `maxRetries`, `retryDelay`, `Action<Exception, string> onAddressableLoadError`.
 *   **`ObjectPool<TKey>` (Lớp cơ sở):** Quản lý instance, tạo (Addressables, gắn `PooledObject`), Get/Return (xử lý Transform, Addressables Error Handling, stats, time), Trimming (theo `PoolTrimmingConfig`), Statistics.
 *   **`UIPool<TKey>` (Kế thừa `ObjectPool<TKey>`):** Chuyên biệt hóa cho UGUI, overrides `SetupTransform` (RectTransform, LayoutElement) và `OnAfterGet` (GraphicRaycaster, Canvas).
-*   **`PoolManager`:** Quản lý pools, API chính (bao gồm `CreateUIPoolAsync`, `GetUI<T>`), Debug Logging (`_isDebugLogEnabled`), Pooling Control (`#if OBJECT_POOLING`), Error Handling Config, Trimming Config, Scene Transition Handling.
+*   **`PoolManager`:** Quản lý pools, API chính (bao gồm `CreateUIPoolAsync`, `GetUI<T>`), Debug Logging (`_isDebugLogEnabled`), Error Handling Config, Trimming Config, Scene Transition Handling.
 
 **5. Tích hợp Addressables - Chiến lược Chi tiết**
 

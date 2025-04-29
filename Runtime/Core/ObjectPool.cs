@@ -29,8 +29,9 @@ namespace com.thelegends.unity.pooling
         // Collections to track instances
         protected readonly Stack<GameObject> _inactiveObjects;
         protected readonly List<GameObject> _activeObjects;
-        
-        // Addressables tracking
+
+        // Prefab management
+        protected GameObject _parentContainer;
         protected AsyncOperationHandle<GameObject> _prefabLoadHandle;
         protected GameObject _loadedPrefab;
         
@@ -153,6 +154,20 @@ namespace com.thelegends.unity.pooling
                 {
                     Debug.LogError($"[ObjectPool] Failed to load prefab for key {_prefabKey}");
                     return false;
+                }
+
+                // Create parent container if it doesn't exist
+                if (_parentContainer == null)
+                {
+                    string containerName = $"Pool - {_loadedPrefab.name}";
+                    _parentContainer = new GameObject(containerName);
+                    
+                    // Add a component to mark this as a pool container (for editor visualization)
+                    var containerMarker = _parentContainer.AddComponent<PoolContainerMarker>();
+                    containerMarker.Initialize(_prefabKey.ToString(), this);
+
+                    // Parent container to PoolManager (which is already DontDestroyOnLoad)
+                    _parentContainer.transform.SetParent(PoolManager.Instance.transform);
                 }
                 
                 // Create initial pool objects
@@ -519,6 +534,13 @@ namespace com.thelegends.unity.pooling
                 Addressables.Release(_prefabLoadHandle);
             }
             
+            // Destroy the container GameObject
+            if (_parentContainer != null)
+            {
+                GameObject.Destroy(_parentContainer);
+                _parentContainer = null;
+            }
+            
             _loadedPrefab = null;
             _isInitialized = false;
             
@@ -647,8 +669,11 @@ namespace com.thelegends.unity.pooling
             // Update stats
             _totalCreated++;
             
-            // Keep track of parent
-            instance.transform.SetParent(null);
+            // Set parent to the container
+            if (_parentContainer != null)
+            {
+                instance.transform.SetParent(_parentContainer.transform, false);
+            }
             
             return instance;
         }
@@ -667,7 +692,20 @@ namespace com.thelegends.unity.pooling
         /// </summary>
         protected virtual void ResetTransform(Transform transform)
         {
-            transform.SetParent(null);
+            if (transform == null)
+                return;
+                
+            // Set parent to container if available
+            if (_parentContainer != null)
+            {
+                transform.SetParent(_parentContainer.transform, false);
+            }
+            else
+            {
+                transform.SetParent(null);
+            }
+            
+            // Reset position, rotation and scale
             transform.localPosition = Vector3.zero;
             transform.localRotation = Quaternion.identity;
             transform.localScale = Vector3.one;
@@ -693,4 +731,4 @@ namespace com.thelegends.unity.pooling
         
         #endregion
     }
-} 
+}

@@ -32,18 +32,11 @@ namespace com.thelegends.unity.pooling
         private PoolConfig _defaultPoolConfig = PoolConfig.Default;
         private PoolTrimmingConfig _defaultTrimmingConfig = PoolTrimmingConfig.Default;
         private AddressableErrorConfig _defaultAddressableErrorConfig = AddressableErrorConfig.Default;
-        
+
         // Debug logging
+        [SerializeField]
         private bool _isDebugLogEnabled = false;
         
-        /// <summary>
-        /// Gets or sets whether debug logging is enabled for pool operations.
-        /// </summary>
-        public bool IsDebugLogEnabled
-        {
-            get => _isDebugLogEnabled;
-            set => _isDebugLogEnabled = value;
-        }
         
         /// <summary>
         /// Gets or sets the default pool configuration used when creating new pools.

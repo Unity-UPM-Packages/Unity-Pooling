@@ -1,3 +1,11 @@
+## [1.0.1](https://github.com/Unity-UPM-Packages/Unity-Pooling/compare/v1.0.0...v1.0.1) (2025-04-29)
+
+
+### Bug Fixes
+
+* remove symbol OBJECT_POOLING ([fbc555a](https://github.com/Unity-UPM-Packages/Unity-Pooling/commit/fbc555a07e9d46e7428b8bf9782fa1b5b485620e))
+* SerializeField _isDebugLogEnabled ([c86102a](https://github.com/Unity-UPM-Packages/Unity-Pooling/commit/c86102a0bfc187cb3a3b00323573e738187f1e89))
+
 # 1.0.0 (2025-04-29)
 
 

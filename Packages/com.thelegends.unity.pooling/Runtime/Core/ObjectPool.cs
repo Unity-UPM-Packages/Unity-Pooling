@@ -323,7 +323,7 @@ namespace com.thelegends.unity.pooling
         #region Pool Operations
         
         /// <summary>
-        /// Gets an object from the pool asynchronously.
+        /// Gets an object from the pool asynchronously with enhanced handling for maxSize limits.
         /// </summary>
         /// <returns>A task that resolves to the pooled GameObject, or null if the operation fails</returns>
         public virtual async Task<GameObject> GetAsync()
@@ -351,6 +351,36 @@ namespace com.thelegends.unity.pooling
             else if (_poolConfig.allowGrowth && (_activeObjects.Count + _inactiveObjects.Count) < _poolConfig.maxSize)
             {
                 instance = CreateInstance();
+            }
+            // Apply recycling strategy if we've hit our size limit
+            else if (_poolConfig.allowGrowth && _poolConfig.recyclingStrategy != PoolRecyclingStrategy.ReturnNull)
+            {
+                switch (_poolConfig.recyclingStrategy)
+                {
+                    case PoolRecyclingStrategy.RecycleLeastRecentlyUsed:
+                        // Find and recycle the least recently used active object
+                        GameObject lruObject = FindLeastRecentlyUsedObject();
+                        if (lruObject != null)
+                        {
+                            Debug.Log($"[ObjectPool] MaxSize limit reached for {_prefabKey}. Recycling least recently used object.");
+                            
+                            // Return the LRU object to the pool
+                            Return(lruObject);
+                            
+                            // Get the newly returned object
+                            instance = _inactiveObjects.Pop();
+                        }
+                        break;
+                        
+                    case PoolRecyclingStrategy.ExceedMaxSizeTemporarily:
+                        // Allow creation beyond maxSize temporarily
+                        Debug.Log($"[ObjectPool] Temporarily exceeding maxSize limit for {_prefabKey}. Current: {_activeObjects.Count + _inactiveObjects.Count}, Max: {_poolConfig.maxSize}");
+                        instance = CreateInstance();
+                        
+                        // Schedule a check to trim back down when possible
+                        StartDynamicResizeCooldown();
+                        break;
+                }
             }
             
             // Process the instance
@@ -417,6 +447,36 @@ namespace com.thelegends.unity.pooling
             else if (_poolConfig.allowGrowth && (_activeObjects.Count + _inactiveObjects.Count) < _poolConfig.maxSize)
             {
                 instance = CreateInstance();
+            }
+            // Apply recycling strategy if we've hit our size limit
+            else if (_poolConfig.allowGrowth && _poolConfig.recyclingStrategy != PoolRecyclingStrategy.ReturnNull)
+            {
+                switch (_poolConfig.recyclingStrategy)
+                {
+                    case PoolRecyclingStrategy.RecycleLeastRecentlyUsed:
+                        // Find and recycle the least recently used active object
+                        GameObject lruObject = FindLeastRecentlyUsedObject();
+                        if (lruObject != null)
+                        {
+                            Debug.Log($"[ObjectPool] MaxSize limit reached for {_prefabKey}. Recycling least recently used object.");
+                            
+                            // Return the LRU object to the pool
+                            Return(lruObject);
+                            
+                            // Get the newly returned object
+                            instance = _inactiveObjects.Pop();
+                        }
+                        break;
+                        
+                    case PoolRecyclingStrategy.ExceedMaxSizeTemporarily:
+                        // Allow creation beyond maxSize temporarily
+                        Debug.Log($"[ObjectPool] Temporarily exceeding maxSize limit for {_prefabKey}. Current: {_activeObjects.Count + _inactiveObjects.Count}, Max: {_poolConfig.maxSize}");
+                        instance = CreateInstance();
+                        
+                        // Schedule a check to trim back down when possible
+                        StartDynamicResizeCooldown();
+                        break;
+                }
             }
             
             // Process the instance
@@ -635,6 +695,33 @@ namespace com.thelegends.unity.pooling
             }
         }
         
+        /// <summary>
+        /// Finds the least recently used active object based on access time.
+        /// This is used by the RecycleLeastRecentlyUsed strategy when the pool reaches its maximum size.
+        /// </summary>
+        /// <returns>The least recently used active GameObject, or null if none found</returns>
+        protected virtual GameObject FindLeastRecentlyUsedObject()
+        {
+            if (_activeObjects.Count == 0)
+                return null;
+                
+            GameObject lruObject = _activeObjects[0];
+            float oldestTime = float.MaxValue;
+            
+            // Find the object with the oldest access time
+            foreach (var obj in _activeObjects)
+            {
+                var pooledObject = obj.GetComponent<PooledObject>();
+                if (pooledObject != null && pooledObject._lastAccessTime < oldestTime)
+                {
+                    oldestTime = pooledObject._lastAccessTime;
+                    lruObject = obj;
+                }
+            }
+            
+            return lruObject;
+        }
+        
         #endregion
         
         #region Helper Methods
@@ -727,6 +814,60 @@ namespace com.thelegends.unity.pooling
         protected virtual void OnBeforeReturn(GameObject instance)
         {
             // Base implementation does nothing
+        }
+        
+        #endregion
+        
+        #region Dynamic Resizing
+        
+        /// <summary>
+        /// Starts a cooldown coroutine to check and potentially shrink the pool back to its original maxSize
+        /// after it was temporarily allowed to exceed its size limit.
+        /// </summary>
+        protected virtual void StartDynamicResizeCooldown()
+        {
+            // Schedule a check to consider shrinking back after a delay
+            // Since this is a non-MonoBehavior class, we'll use the PoolManager to start the coroutine
+            PoolManager.Instance.StartCoroutine(ConsiderShrinkAfterDelay());
+        }
+
+        /// <summary>
+        /// Coroutine that waits for a period and then attempts to shrink the pool back to its original size
+        /// if the demand has decreased.
+        /// </summary>
+        protected virtual System.Collections.IEnumerator ConsiderShrinkAfterDelay()
+        {
+            // Store the original size for reference
+            int originalMaxSize = _poolConfig.maxSize;
+            int currentTotalSize = _activeObjects.Count + _inactiveObjects.Count;
+            
+            // Wait for the cooldown period (30 seconds is a reasonable default)
+            yield return new WaitForSeconds(30f);
+            
+            // After waiting, check if we can safely shrink the pool back
+            if (_activeObjects.Count <= originalMaxSize * 0.8f)
+            {
+                // The demand has decreased, we can shrink back closer to the original size
+                // Perform a more aggressive trim to bring us closer to the original size
+                Debug.Log($"[ObjectPool] Pool for {_prefabKey} has decreased demand. Performing aggressive trim to return to original size.");
+                
+                // First, force a trim operation
+                _lastTrimTime = 0; // Reset the last trim time to force a trim
+                TrimExcess();
+                
+                // Log the results
+                int newSize = _activeObjects.Count + _inactiveObjects.Count;
+                Debug.Log($"[ObjectPool] Pool for {_prefabKey} shrunk from {currentTotalSize} to {newSize} objects after demand decreased.");
+            }
+            else
+            {
+                // We're still using more objects than our original max size
+                // Schedule another check for later
+                Debug.Log($"[ObjectPool] Pool for {_prefabKey} still has high demand ({_activeObjects.Count} active objects). Will check again later.");
+                
+                // Optionally schedule another check
+                // PoolManager.Instance.StartCoroutine(ConsiderShrinkAfterDelay());
+            }
         }
         
         #endregion

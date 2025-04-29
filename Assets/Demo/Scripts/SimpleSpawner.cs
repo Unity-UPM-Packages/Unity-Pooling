@@ -27,14 +27,8 @@ public class SimpleSpawner : MonoBehaviour
         // Kế hoạch 7.0 có symbol OBJECT_POOLING, nhưng ở đây ta dùng biến bool cho dễ demo
         #if OBJECT_POOLING // Giả sử bạn có symbol này theo kế hoạch
         Debug.Log("Pooling is Enabled via Symbol.");
-        PoolConfig config = new PoolConfig
-        {
-            initialSize = 10,
-            allowGrowth = true,
-            maxSize = 300
-        };
         // Sử dụng prefab trực tiếp thay vì Addressables cho đơn giản
-        await poolManager.CreatePoolAsync(poolKey, PoolConfig.Default, AddressableErrorConfig.Default, PoolTrimmingConfig.Default);
+        await poolManager.CreatePoolAsync(poolKey, PoolConfig.ExceedMaxSizeConfig(10, true, 100), AddressableErrorConfig.Default, PoolTrimmingConfig.Default);
         #else
         Debug.LogWarning("Pooling is Disabled (OBJECT_POOLING symbol not defined). Using Instantiate/Destroy.");
         usePooling = false; // Buộc không dùng pooling nếu symbol không được định nghĩa

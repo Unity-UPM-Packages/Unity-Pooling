@@ -13,7 +13,7 @@ namespace com.thelegends.unity.pooling.Editor
     /// </summary>
     public class PoolManagerEditor : EditorWindow
     {
-        [MenuItem("Tools/Object Pooling/Pool Manager")]
+        [MenuItem("Tools/TripSoft/Object Pool Management")]
         public static void ShowWindow()
         {
             GetWindow<PoolManagerEditor>("Pool Manager");

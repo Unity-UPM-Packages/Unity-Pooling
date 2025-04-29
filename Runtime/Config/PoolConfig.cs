@@ -26,6 +26,12 @@ namespace com.thelegends.unity.pooling
         /// </summary>
         [Tooltip("Maximum number of instances this pool can grow to (if allowGrowth is true)")]
         public int maxSize;
+        
+        /// <summary>
+        /// Strategy to use when the pool reaches its maximum size.
+        /// </summary>
+        [Tooltip("How to handle requests when the pool reaches its maximum size")]
+        public PoolRecyclingStrategy recyclingStrategy;
 
         /// <summary>
         /// Creates a new PoolConfig with the specified parameters.
@@ -33,30 +39,60 @@ namespace com.thelegends.unity.pooling
         /// <param name="initialSize">Initial number of objects to prewarm</param>
         /// <param name="allowGrowth">Whether the pool can grow beyond initial size</param>
         /// <param name="maxSize">Maximum size the pool can grow to</param>
-        public PoolConfig(int initialSize, bool allowGrowth, int maxSize)
+        /// <param name="recyclingStrategy">Strategy to use when pool reaches maximum size</param>
+        public PoolConfig(int initialSize, bool allowGrowth, int maxSize, PoolRecyclingStrategy recyclingStrategy = PoolRecyclingStrategy.ExceedMaxSizeTemporarily)
         {
             this.initialSize = initialSize;
             this.allowGrowth = allowGrowth;
             this.maxSize = maxSize;
+            this.recyclingStrategy = recyclingStrategy;
         }
 
         /// <summary>
-        /// Gets the default pool configuration as specified in the design plan.
+        /// Gets the default pool configuration as specified in the design plan (ExceedMaxSizeTemporarily strategy).
         /// </summary>
-        public static PoolConfig Default => new PoolConfig(10, true, 100);
-
+        public static PoolConfig Default => new PoolConfig(10, true, 100, PoolRecyclingStrategy.ExceedMaxSizeTemporarily);
+        
         /// <summary>
-        /// Creates a new pool configuration with the specified initial size, using default values for other parameters.
+        /// Creates a pool configuration that returns null when the pool reaches its maximum size.
+        /// This is the traditional object pooling behavior.
         /// </summary>
         /// <param name="initialSize">Initial number of objects to prewarm</param>
-        /// <returns>A new PoolConfig with the specified initial size and default values for other parameters</returns>
-        public static PoolConfig WithInitialSize(int initialSize) => new PoolConfig(initialSize, true, Math.Max(initialSize * 2, 100));
-
+        /// <param name="allowGrowth">Whether the pool can grow beyond initial size</param>
+        /// <param name="maxSize">Maximum size the pool can grow to</param>
+        /// <returns>A pool configuration with ReturnNull strategy</returns>
+        public static PoolConfig ReturnNullConfig(int initialSize, bool allowGrowth, int maxSize) =>
+            new PoolConfig(initialSize, allowGrowth, maxSize, PoolRecyclingStrategy.ReturnNull);
+            
+        /// <summary>
+        /// Creates a pool configuration that automatically recycles the least recently used object
+        /// when the pool reaches its maximum size. This ensures a request always returns an object.
+        /// </summary>
+        /// <param name="initialSize">Initial number of objects to prewarm</param>
+        /// <param name="allowGrowth">Whether the pool can grow beyond initial size</param>
+        /// <param name="maxSize">Maximum size the pool can grow to</param>
+        /// <returns>A pool configuration with RecycleLeastRecentlyUsed strategy</returns>
+        public static PoolConfig RecycleLRUConfig(int initialSize, bool allowGrowth, int maxSize) => 
+            new PoolConfig(initialSize, allowGrowth, maxSize, PoolRecyclingStrategy.RecycleLeastRecentlyUsed);
+            
+        /// <summary>
+        /// Creates a pool configuration that temporarily allows exceeding the maximum size limit
+        /// when the pool is full. The pool will try to shrink back when possible.
+        /// </summary>
+        /// <param name="initialSize">Initial number of objects to prewarm</param>
+        /// <param name="allowGrowth">Whether the pool can grow beyond initial size</param>
+        /// <param name="maxSize">Soft maximum size limit (may be exceeded temporarily)</param>
+        /// <returns>A pool configuration with ExceedMaxSizeTemporarily strategy</returns>
+        public static PoolConfig ExceedMaxSizeConfig(int initialSize, bool allowGrowth, int maxSize) => 
+            new PoolConfig(initialSize, allowGrowth, maxSize, PoolRecyclingStrategy.ExceedMaxSizeTemporarily);
+            
         /// <summary>
         /// Creates a fixed-size pool configuration that won't grow beyond the initial size.
+        /// Uses the ReturnNull strategy when the pool is exhausted.
         /// </summary>
-        /// <param name="size">The fixed size of the pool</param>
-        /// <returns>A new PoolConfig with fixed size (won't grow)</returns>
-        public static PoolConfig FixedSize(int size) => new PoolConfig(size, false, size);
+        /// <param name="fixedSize">The fixed size of the pool (both initial and max size)</param>
+        /// <returns>A pool configuration with fixed size and ReturnNull strategy</returns>
+        public static PoolConfig FixedSizeConfig(int fixedSize) => 
+            new PoolConfig(fixedSize, false, fixedSize, PoolRecyclingStrategy.ReturnNull);
     }
-} 
+}

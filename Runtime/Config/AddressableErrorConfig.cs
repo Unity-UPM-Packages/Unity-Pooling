@@ -68,35 +68,78 @@ namespace com.thelegends.unity.pooling
         );
         
         /// <summary>
-        /// Creates a configuration for the RetryWithTimeout strategy.
+        /// Creates a configuration for the LogAndReturnNull strategy.
+        /// This strategy logs errors and returns null when Addressable loading fails.
         /// </summary>
-        /// <param name="maxRetries">Maximum number of retry attempts</param>
-        /// <param name="retryDelay">Delay in seconds between retry attempts</param>
-        /// <param name="onError">Optional callback when errors occur</param>
-        public static AddressableErrorConfig RetryStrategy(
-            int maxRetries = 3, 
-            float retryDelay = 1.0f,
-            Action<Exception, string> onError = null) => new AddressableErrorConfig(
-                errorHandlingStrategy: AddressableErrorHandling.RetryWithTimeout,
+        /// <param name="onError">Optional callback to execute when an error occurs</param>
+        /// <returns>A new AddressableErrorConfig configured for the LogAndReturnNull strategy</returns>
+        public static AddressableErrorConfig LogAndReturnNullConfig(Action<Exception, string> onError = null) => 
+            new AddressableErrorConfig(
+                errorHandlingStrategy: AddressableErrorHandling.LogAndReturnNull,
                 fallbackPrefab: null,
-                maxRetries: maxRetries,
-                retryDelay: retryDelay,
+                maxRetries: 0,
+                retryDelay: 0f,
                 onAddressableLoadError: onError
             );
-        
+            
+        /// <summary>
+        /// Creates a configuration for the ThrowException strategy.
+        /// This strategy throws exceptions when Addressable loading fails, allowing for try/catch handling.
+        /// </summary>
+        /// <param name="onError">Optional callback that runs before the exception is thrown</param>
+        /// <returns>A new AddressableErrorConfig configured for the ThrowException strategy</returns>
+        public static AddressableErrorConfig ThrowExceptionConfig(Action<Exception, string> onError = null) => 
+            new AddressableErrorConfig(
+                errorHandlingStrategy: AddressableErrorHandling.ThrowException,
+                fallbackPrefab: null,
+                maxRetries: 0,
+                retryDelay: 0f,
+                onAddressableLoadError: onError
+            );
+            
         /// <summary>
         /// Creates a configuration for the ReturnPlaceholder strategy.
+        /// This strategy returns a fallback prefab when Addressable loading fails.
         /// </summary>
-        /// <param name="fallbackPrefab">Prefab to use when an asset fails to load</param>
+        /// <param name="fallbackPrefab">Required prefab to use as a placeholder (must not be null)</param>
         /// <param name="onError">Optional callback when errors occur</param>
-        public static AddressableErrorConfig PlaceholderStrategy(
-            GameObject fallbackPrefab,
-            Action<Exception, string> onError = null) => new AddressableErrorConfig(
+        /// <returns>A new AddressableErrorConfig configured for the ReturnPlaceholder strategy</returns>
+        public static AddressableErrorConfig ReturnPlaceholderConfig(
+            GameObject fallbackPrefab, 
+            Action<Exception, string> onError = null)
+        {
+            if (fallbackPrefab == null)
+            {
+                Debug.LogWarning("ReturnPlaceholder strategy requires a non-null fallbackPrefab. Consider using LogAndReturnNullConfig instead.");
+            }
+            
+            return new AddressableErrorConfig(
                 errorHandlingStrategy: AddressableErrorHandling.ReturnPlaceholder,
                 fallbackPrefab: fallbackPrefab,
                 maxRetries: 0,
                 retryDelay: 0f,
                 onAddressableLoadError: onError
             );
+        }
+            
+        /// <summary>
+        /// Creates a configuration for the RetryWithTimeout strategy.
+        /// This strategy retries failed Addressable loading attempts with a delay between retries.
+        /// </summary>
+        /// <param name="maxRetries">Maximum number of retry attempts</param>
+        /// <param name="retryDelay">Delay in seconds between retry attempts</param>
+        /// <param name="onError">Optional callback when errors occur</param>
+        /// <returns>A new AddressableErrorConfig configured for the RetryWithTimeout strategy</returns>
+        public static AddressableErrorConfig RetryWithTimeoutConfig(
+            int maxRetries = 3,
+            float retryDelay = 1.0f,
+            Action<Exception, string> onError = null) => 
+            new AddressableErrorConfig(
+                errorHandlingStrategy: AddressableErrorHandling.RetryWithTimeout,
+                fallbackPrefab: null,
+                maxRetries: maxRetries,
+                retryDelay: retryDelay,
+                onAddressableLoadError: onError
+            );
     }
-} 
+}

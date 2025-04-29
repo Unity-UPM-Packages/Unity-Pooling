@@ -51,6 +51,29 @@ public class AnimateOnEnable : MonoBehaviour
         transform.localScale = Vector3.zero;
     }
 
+    /// <summary>
+    /// Phương thức này cho phép khởi động lại hiệu ứng scale up và đổi màu từ bên ngoài,
+    /// ngay cả khi object đã active và OnEnable không được gọi lại.
+    /// Đặc biệt hữu ích khi sử dụng với Object Pooling.
+    /// </summary>
+    public void ResetAndPlayAnimation()
+    {
+        // Reset scale về 0
+        transform.localScale = Vector3.zero;
+        
+        // Dừng coroutine cũ nếu đang chạy
+        if (scaleCoroutine != null)
+        {
+            StopCoroutine(scaleCoroutine);
+        }
+        
+        // Đặt màu ngẫu nhiên
+        SetRandomColor();
+        
+        // Bắt đầu hiệu ứng scale
+        scaleCoroutine = StartCoroutine(ScaleUp());
+    }
+
     void SetRandomColor()
     {
         if (objectRenderer != null && randomColors.Length > 0)

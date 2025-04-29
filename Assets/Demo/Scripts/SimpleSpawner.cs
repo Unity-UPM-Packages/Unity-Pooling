@@ -75,6 +75,15 @@ public class SimpleSpawner : MonoBehaviour
             // Chỉ cần đặt vị trí và rotation
             pooledObject.transform.position = position;
             pooledObject.transform.rotation = Quaternion.identity;
+            
+            // Khắc phục vấn đề với AnimateOnEnable - reset và kích hoạt lại hiệu ứng
+            AnimateOnEnable animateComponent = pooledObject.GetComponent<AnimateOnEnable>();
+            if (animateComponent != null)
+            {
+                // Cần đảm bảo reset scale về 0 và restart animation
+                // Vì OnEnable() có thể không được gọi lại nếu object đã active
+                animateComponent.ResetAndPlayAnimation();
+            }
         }
     }
 

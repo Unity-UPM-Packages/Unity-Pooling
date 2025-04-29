@@ -510,8 +510,8 @@ PoolManagerEditor là công cụ mạnh mẽ giúp bạn giám sát, phân tích
 
 ```csharp
 // Mở cửa sổ PoolManagerEditor
-// Từ menu: Window > Object Pooling > Pool Manager
-[MenuItem("Window/Object Pooling/Pool Manager")]
+// Từ menu: Window > TripSoft > Object Pool Management
+[MenuItem("Window/TripSoft/Object Pool Management")]
 private static void ShowWindow()
 {
     EditorWindow.GetWindow<PoolManagerEditor>("Pool Manager");

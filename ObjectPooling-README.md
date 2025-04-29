@@ -21,6 +21,8 @@
   - [7. Xử lý lỗi Addressables](#7-xử-lý-lỗi-addressables)
   - [8. Tối ưu hóa với Trimming](#8-tối-ưu-hóa-với-trimming)
   - [9. Quản lý quá trình chuyển Scene](#9-quản-lý-quá-trình-chuyển-scene)
+  - [10. Chiến lược xử lý khi vượt quá maxSize](#10-chiến-lược-xử-lý-khi-vượt-quá-maxsize)
+  - [11. Tổ chức hierarchy của Pooled Objects](#11-tổ-chức-hierarchy-của-pooled-objects)
 - [Công cụ PoolManagerEditor](#công-cụ-poolmanagereditor)
   - [1. Truy cập PoolManagerEditor](#1-truy-cập-poolmanagereditor)
   - [2. Tổng quan về Dashboard](#2-tổng-quan-về-dashboard)
@@ -38,6 +40,7 @@
   - [3. UI Pooling](#3-ui-pooling)
   - [4. Thread Safety](#4-thread-safety)
   - [5. Debugging và Troubleshooting](#5-debugging-và-troubleshooting)
+  - [6. Tổ chức Hierarchy](#6-tổ-chức-hierarchy)
 
 ## Giới thiệu
 
@@ -54,6 +57,8 @@ Object Pooling là một kỹ thuật tối ưu hóa hiệu năng quan trọng t
 - **API dễ sử dụng và an toàn**: Generic type-safe, không cần key khi return
 - **Linh hoạt và mở rộng**: Tùy chỉnh thông qua IPoolable, các cấu hình đa dạng
 - **Tuân thủ SOLID**: Thiết kế mô-đun, dễ bảo trì và mở rộng
+- **Tổ chức Hierarchy gọn gàng**: Các đối tượng trong pool được nhóm trong các container riêng biệt
+- **Chiến lược xử lý thông minh khi vượt quá giới hạn**: Nhiều chiến lược để xử lý tình huống pool đạt maxSize
 
 ### Khi nào nên sử dụng Object Pooling?
 
@@ -759,7 +764,7 @@ public class WeaponSystem : MonoBehaviour
             minimumRetainCount = 3
         };
         
-        // Tạo các pool
+        // Tạo pool
         await _poolManager.CreatePoolAsync(bulletPoolKey, bulletPoolKey, bulletConfig);
         await _poolManager.CreatePoolAsync(muzzleFlashPoolKey, muzzleFlashPoolKey, effectConfig, null, effectTrimmingConfig);
         await _poolManager.CreatePoolAsync(impactEffectPoolKey, impactEffectPoolKey, effectConfig, null, effectTrimmingConfig);
@@ -1278,5 +1283,162 @@ public class ParticleSystemManager : MonoBehaviour
 
 - **Sử dụng PoolManagerEditor**: Thường xuyên kiểm tra dashboard để phát hiện vấn đề hiệu năng.
 - **Bật Debug Logs**: Khi gặp vấn đề, bật IsDebugLogEnabled để xem chi tiết các hoạt động của pool.
-- **Mô hình Mental**: Luôn hiểu rõ vòng đời của object trong pool (instantiate -> inactive -> active -> inactive -> ...) để dễ debug.
-``` 
+- **Mô hình Mental**: Luôn hiểu rõ vòng đời của object trong pool (instantiate -> inactive -> active -> ...) để dễ debug.
+
+### 10. Chiến lược xử lý khi vượt quá maxSize
+
+Thư viện Object Pooling 7.0 cung cấp các chiến lược linh hoạt để xử lý tình huống khi một pool đạt đến giới hạn `maxSize`. Thay vì chỉ đơn giản trả về `null`, bạn có thể áp dụng các chiến lược thông minh để đảm bảo hệ thống vẫn hoạt động hiệu quả.
+
+#### ReturnNull (Mặc định)
+
+Chiến lược mặc định, trả về `null` khi pool đầy, cho phép code gọi tự quyết định xử lý.
+
+```csharp
+// Thiết lập chiến lược ReturnNull
+PoolConfig config = PoolConfig.ReturnNullConfig(
+    initialSize: 50,
+    allowGrowth: true,
+    maxSize: 100
+);
+
+await poolManager.CreatePoolAsync("Bullet", bulletPrefab, config);
+
+// Sử dụng với xử lý defensive trong code gọi
+GameObject bullet = await poolManager.GetAsync("Bullet");
+if (bullet == null)
+{
+    // Xử lý trường hợp hết đạn
+    PlayOutOfAmmoSound();
+    ShowReloadIndicator();
+    return;
+}
+
+// Tiếp tục sử dụng bullet
+```
+
+#### RecycleLeastRecentlyUsed
+
+Chiến lược này tự động tái sử dụng đối tượng được sử dụng cách đây lâu nhất khi pool đầy.
+
+```csharp
+// Thiết lập chiến lược RecycleLeastRecentlyUsed
+PoolConfig config = PoolConfig.RecycleLRUConfig(
+    initialSize: 20,
+    allowGrowth: true,
+    maxSize: 40
+);
+
+await poolManager.CreatePoolAsync("Enemy", enemyPrefab, config);
+
+// Trong code gọi, không cần xử lý null - luôn nhận được object
+GameObject enemy = await poolManager.GetAsync("Enemy");
+// enemy sẽ không bao giờ null ngay cả khi đạt đến maxSize
+// (trừ khi có lỗi Addressable)
+```
+
+#### ExceedMaxSizeTemporarily
+
+Chiến lược này cho phép pool tạm thời vượt quá giới hạn `maxSize` và sẽ tự điều chỉnh lại về kích thước phù hợp khi nhu cầu giảm.
+
+```csharp
+// Thiết lập chiến lược ExceedMaxSizeTemporarily
+PoolConfig config = PoolConfig.ExceedMaxSizeConfig(
+    initialSize: 30,
+    allowGrowth: true,
+    maxSize: 50  // Có thể tạm thời vượt quá giới hạn này khi cần
+);
+
+await poolManager.CreatePoolAsync("ExplosionEffect", explosionPrefab, config);
+
+// Trong trường hợp nhiều vụ nổ xảy ra cùng lúc (vượt quá maxSize=50),
+// pool vẫn có thể tạo thêm object và giảm dần khi hết nhu cầu
+for (int i = 0; i < 60; i++) 
+{
+    var explosion = await poolManager.GetAsync("ExplosionEffect");
+    explosion.transform.position = explosionPositions[i];
+}
+
+// Sau 30 giây, hệ thống sẽ tự động giảm kích thước pool về gần maxSize
+```
+
+#### Sử dụng chiến lược phù hợp với từng loại đối tượng
+
+```csharp
+// Đối tượng quan trọng - luôn muốn hiển thị
+await poolManager.CreatePoolAsync("Player", playerPrefab, 
+    PoolConfig.RecycleLRUConfig(initialSize: 1, allowGrowth: false, maxSize: 1));
+
+// Đối tượng có thể thiếu - trả về null khi không có
+await poolManager.CreatePoolAsync("PowerUp", powerupPrefab,
+    PoolConfig.ReturnNullConfig(initialSize: 5, allowGrowth: true, maxSize: 10));
+    
+// Đối tượng cần linh hoạt - cho phép tạm thời vượt quá giới hạn
+await poolManager.CreatePoolAsync("Projectile", projectilePrefab,
+    PoolConfig.ExceedMaxSizeConfig(initialSize: 100, allowGrowth: true, maxSize: 200));
+    
+// Pool linh hoạt nâng cao - thiết lập tùy chỉnh
+PoolConfig customConfig = new PoolConfig(
+    initialSize: 50,
+    allowGrowth: true,
+    maxSize: 100,
+    recyclingStrategy: PoolRecyclingStrategy.RecycleLeastRecentlyUsed
+);
+await poolManager.CreatePoolAsync("CustomObject", customPrefab, customConfig);
+```
+
+### 11. Tổ chức hierarchy của Pooled Objects
+
+Thư viện Object Pooling 7.0 tự động tổ chức các đối tượng trong pool một cách gọn gàng trong hierarchy của Unity. Mỗi loại pool có một GameObject container riêng, giúp dễ dàng quản lý và debug.
+
+#### Cấu trúc hierarchy tự động
+
+Khi bạn tạo một pool mới, hệ thống sẽ tự động tạo một GameObject container với tên dựa trên prefab:
+
+```
+Scene
+└── DontDestroyOnLoad
+    └── PoolManager
+        ├── Pool - Bullet (Container)
+        │   ├── Bullet (Pooled 0) [Inactive]
+        │   ├── Bullet (Pooled 1) [Inactive]
+        │   └── ... 
+        ├── Pool - Enemy (Container)
+        │   ├── Enemy (Pooled 0) [Inactive]
+        │   ├── Enemy (Pooled 1) [Inactive)
+        │   └── ...
+        └── ...
+```
+
+#### Cách hoạt động
+
+1. **Khởi tạo container:** Mỗi khi bạn tạo một pool mới, hệ thống tạo một container GameObject với tên "Pool - {PrefabName}".
+
+2. **Đánh dấu với PoolContainerMarker:** Mỗi container được gắn với một component `PoolContainerMarker` để dễ dàng nhận biết và quản lý.
+
+3. **Tự động tổ chức:** Các đối tượng trong pool khi không hoạt động (inactive) sẽ được đặt vào container tương ứng.
+
+4. **Xử lý thông minh khi trả về pool:** Khi một đối tượng được trả về pool, nó sẽ tự động reparent vào container phù hợp.
+
+#### Cách vận hành với đối tượng UI
+
+Đối với UIPool, hệ thống xử lý đặc biệt để đảm bảo UI hoạt động chính xác:
+
+```csharp
+// Khi lấy UI từ pool
+GameObject uiElement = await poolManager.GetUIAsync("UIButton", canvasTransform);
+// uiElement sẽ được tự động parent vào canvasTransform
+
+// Khi trả UI về pool
+poolManager.ReturnToPool(uiElement);
+// uiElement sẽ tự động được chuyển về đúng container
+```
+
+#### Lợi ích
+
+1. **Tổ chức hierarchy gọn gàng:** Dễ dàng tìm và quản lý các đối tượng trong Editor.
+
+2. **Debug hiệu quả:** Có thể bật/tắt toàn bộ một loại pool bằng cách bật/tắt container.
+
+3. **Kiểm soát tốt hơn:** Dễ dàng xem số lượng và trạng thái của tất cả các đối tượng trong một pool cụ thể.
+
+4. **Phân tách rõ ràng:** Các đối tượng đang hoạt động và không hoạt động được phân tách rõ ràng.

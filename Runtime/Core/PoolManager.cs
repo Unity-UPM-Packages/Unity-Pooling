@@ -98,7 +98,6 @@ namespace com.thelegends.unity.pooling
             AddressableErrorConfig? addressableErrorConfig = null,
             PoolTrimmingConfig? trimmingConfig = null)
         {
-#if OBJECT_POOLING
             // Use provided configs or fall back to defaults
             var finalPoolConfig = poolConfig ?? _defaultPoolConfig;
             var finalAddressableErrorConfig = addressableErrorConfig ?? _defaultAddressableErrorConfig;
@@ -139,14 +138,6 @@ namespace com.thelegends.unity.pooling
             _pools[prefabKey] = newPool;
             
             return newPool;
-#else
-            // When pooling is disabled, return null - direct instantiation will be used instead
-            if (_isDebugLogEnabled)
-            {
-                Debug.Log($"[PoolManager] Pooling is disabled (OBJECT_POOLING symbol not defined). Returning null pool for: {prefabKey}");
-            }
-            return null;
-#endif
         }
         
         #endregion
@@ -176,7 +167,6 @@ namespace com.thelegends.unity.pooling
             bool manageRaycasters = true,
             bool manageCanvases = true)
         {
-#if OBJECT_POOLING
             // Use provided configs or fall back to defaults
             var finalPoolConfig = poolConfig ?? _defaultPoolConfig;
             var finalAddressableErrorConfig = addressableErrorConfig ?? _defaultAddressableErrorConfig;
@@ -224,14 +214,6 @@ namespace com.thelegends.unity.pooling
             _pools[compositeKey] = newPool;
             
             return newPool;
-#else
-            // When pooling is disabled, return null - direct instantiation will be used instead
-            if (_isDebugLogEnabled)
-            {
-                Debug.Log($"[PoolManager] Pooling is disabled (OBJECT_POOLING symbol not defined). Returning null UI pool for: {prefabKey}");
-            }
-            return null;
-#endif
         }
         
         #endregion
@@ -246,7 +228,6 @@ namespace com.thelegends.unity.pooling
         /// <returns>A task that resolves to the pooled GameObject, or null if the operation fails</returns>
         public async Task<GameObject> GetAsync<TKey>(TKey prefabKey)
         {
-#if OBJECT_POOLING
             ObjectPool<TKey> pool = await GetOrCreatePoolAsync(prefabKey);
             if (pool == null)
             {
@@ -254,15 +235,6 @@ namespace com.thelegends.unity.pooling
             }
             
             return await pool.GetAsync();
-#else
-            // When pooling is disabled, directly instantiate the object
-            if (_isDebugLogEnabled)
-            {
-                Debug.Log($"[PoolManager] Pooling is disabled. Directly instantiating: {prefabKey}");
-            }
-            
-            return await InstantiateFallbackAsync(prefabKey);
-#endif
         }
         
         /// <summary>
@@ -273,7 +245,6 @@ namespace com.thelegends.unity.pooling
         /// <returns>The pooled GameObject, or null if the operation fails</returns>
         public GameObject Get<TKey>(TKey prefabKey)
         {
-#if OBJECT_POOLING
             // Check if a pool exists for this key
             if (!_pools.TryGetValue(prefabKey, out var poolObj) || !(poolObj is ObjectPool<TKey> pool))
             {
@@ -285,15 +256,6 @@ namespace com.thelegends.unity.pooling
             }
             
             return pool.Get();
-#else
-            // When pooling is disabled, directly instantiate the object
-            if (_isDebugLogEnabled)
-            {
-                Debug.Log($"[PoolManager] Pooling is disabled. Directly instantiating: {prefabKey}");
-            }
-            
-            return InstantiateFallback(prefabKey);
-#endif
         }
         
         /// <summary>
@@ -356,7 +318,6 @@ namespace com.thelegends.unity.pooling
         /// <returns>A task that resolves to the pooled UI GameObject, or null if the operation fails</returns>
         public async Task<GameObject> GetUIAsync<TKey>(TKey prefabKey)
         {
-#if OBJECT_POOLING
             // Create a composite key for UI pools
             var compositeKey = (object)new Tuple<TKey, string>(prefabKey, "UI_POOL");
             
@@ -371,15 +332,6 @@ namespace com.thelegends.unity.pooling
             }
             
             return await uiPool.GetAsync();
-#else
-            // When pooling is disabled, directly instantiate the object
-            if (_isDebugLogEnabled)
-            {
-                Debug.Log($"[PoolManager] Pooling is disabled. Directly instantiating UI: {prefabKey}");
-            }
-            
-            return await InstantiateFallbackAsync(prefabKey);
-#endif
         }
         
         /// <summary>
@@ -391,7 +343,6 @@ namespace com.thelegends.unity.pooling
         /// <returns>A task that resolves to the requested UI component, or null if it doesn't exist</returns>
         public async Task<TComponent> GetUIAsync<TKey, TComponent>(TKey prefabKey) where TComponent : Component
         {
-#if OBJECT_POOLING
             // Create a composite key for UI pools
             var compositeKey = (object)new Tuple<TKey, string>(prefabKey, "UI_POOL");
             
@@ -406,27 +357,6 @@ namespace com.thelegends.unity.pooling
             }
             
             return await uiPool.GetComponentAsync<TComponent>();
-#else
-            // When pooling is disabled, directly instantiate the object
-            if (_isDebugLogEnabled)
-            {
-                Debug.Log($"[PoolManager] Pooling is disabled. Directly instantiating UI: {prefabKey}");
-            }
-            
-            GameObject instance = await InstantiateFallbackAsync(prefabKey);
-            if (instance == null)
-                return null;
-                
-            TComponent component = instance.GetComponent<TComponent>();
-            if (component == null)
-            {
-                Debug.LogWarning($"[PoolManager] UI object doesn't have component of type {typeof(TComponent).Name}");
-                GameObject.Destroy(instance);
-                return null;
-            }
-            
-            return component;
-#endif
         }
         
         #endregion
@@ -440,7 +370,6 @@ namespace com.thelegends.unity.pooling
         /// <returns>True if the object was successfully returned, false otherwise</returns>
         public bool ReturnToPool(GameObject instance)
         {
-#if OBJECT_POOLING
             if (instance == null)
             {
                 Debug.LogError("[PoolManager] Cannot return null instance to pool");
@@ -460,14 +389,6 @@ namespace com.thelegends.unity.pooling
             // The PooledObject component will handle returning to the correct pool
             pooledObject.ReturnToPool();
             return true;
-#else
-            // When pooling is disabled, destroy the object
-            if (instance != null)
-            {
-                GameObject.Destroy(instance);
-            }
-            return true;
-#endif
         }
         
         #endregion
@@ -501,7 +422,6 @@ namespace com.thelegends.unity.pooling
         /// <returns>True if the pool was found and cleared, false otherwise</returns>
         public bool ClearPool<TKey>(TKey prefabKey, bool isUIPool = false)
         {
-#if OBJECT_POOLING
             object key = prefabKey;
             
             if (isUIPool)
@@ -531,9 +451,6 @@ namespace com.thelegends.unity.pooling
             }
             
             return false;
-#else
-            return true;
-#endif
         }
         
         /// <summary>
@@ -541,7 +458,6 @@ namespace com.thelegends.unity.pooling
         /// </summary>
         public void ClearAllPools()
         {
-#if OBJECT_POOLING
             foreach (var poolObj in _pools.Values)
             {
                 if (poolObj is IDisposable disposable)
@@ -561,7 +477,6 @@ namespace com.thelegends.unity.pooling
             {
                 Debug.Log("[PoolManager] Cleared all pools");
             }
-#endif
         }
         
         /// <summary>
@@ -569,7 +484,6 @@ namespace com.thelegends.unity.pooling
         /// </summary>
         public void TrimExcessPools()
         {
-#if OBJECT_POOLING
             foreach (var poolObj in _pools.Values)
             {
                 if (poolObj.GetType().GetMethod("TrimExcess") != null)
@@ -583,7 +497,6 @@ namespace com.thelegends.unity.pooling
             {
                 Debug.Log("[PoolManager] Trimmed excess objects from all pools");
             }
-#endif
         }
         
         /// <summary>
@@ -601,7 +514,6 @@ namespace com.thelegends.unity.pooling
             AddressableErrorConfig? addressableErrorConfig = null,
             PoolTrimmingConfig? trimmingConfig = null)
         {
-#if OBJECT_POOLING
             List<Task> initTasks = new List<Task>();
             
             foreach (var key in prefabKeys)
@@ -615,7 +527,6 @@ namespace com.thelegends.unity.pooling
             {
                 Debug.Log($"[PoolManager] Prewarmed multiple pools");
             }
-#endif
         }
         
         #endregion
@@ -635,81 +546,5 @@ namespace com.thelegends.unity.pooling
         }
         
         #endregion
-        
-        #region Fallback (non-pooling)
-        
-        /// <summary>
-        /// Instantiates an object directly when pooling is disabled.
-        /// </summary>
-        /// <typeparam name="TKey">The type of key used to identify the prefab</typeparam>
-        /// <param name="prefabKey">The key identifying the prefab to instantiate</param>
-        /// <returns>The instantiated GameObject, or null if the operation fails</returns>
-        private GameObject InstantiateFallback<TKey>(TKey prefabKey)
-        {
-            if (prefabKey is GameObject directPrefab)
-            {
-                return GameObject.Instantiate(directPrefab);
-            }
-            
-            if (_isDebugLogEnabled)
-            {
-                Debug.LogWarning($"[PoolManager] Cannot instantiate fallback for key type {typeof(TKey).Name} synchronously. Use async method instead.");
-            }
-            
-            return null;
-        }
-        
-        /// <summary>
-        /// Instantiates an object directly when pooling is disabled (async version).
-        /// </summary>
-        /// <typeparam name="TKey">The type of key used to identify the prefab</typeparam>
-        /// <param name="prefabKey">The key identifying the prefab to instantiate</param>
-        /// <returns>A task that resolves to the instantiated GameObject, or null if the operation fails</returns>
-        private async Task<GameObject> InstantiateFallbackAsync<TKey>(TKey prefabKey)
-        {
-            if (prefabKey is GameObject directPrefab)
-            {
-                return GameObject.Instantiate(directPrefab);
-            }
-            
-            if (prefabKey is string assetKey)
-            {
-#if UNITY_ADDRESSABLES
-                try
-                {
-                    AsyncOperationHandle<GameObject> handle = Addressables.LoadAssetAsync<GameObject>(assetKey);
-                    await handle.Task;
-                    
-                    if (handle.Status == AsyncOperationStatus.Succeeded)
-                    {
-                        GameObject instance = GameObject.Instantiate(handle.Result);
-                        
-                        // Release the asset reference to avoid memory leaks
-                        Addressables.Release(handle);
-                        
-                        return instance;
-                    }
-                    else
-                    {
-                        Debug.LogError($"[PoolManager] Failed to load Addressable asset: {assetKey}");
-                        return null;
-                    }
-                }
-                catch (Exception ex)
-                {
-                    Debug.LogError($"[PoolManager] Error loading Addressable asset: {assetKey}, {ex.Message}");
-                    return null;
-                }
-#else
-                Debug.LogError($"[PoolManager] Addressables not available. Cannot load asset: {assetKey}");
-                return null;
-#endif
-            }
-            
-            Debug.LogError($"[PoolManager] Unsupported prefab key type: {typeof(TKey).Name}");
-            return null;
-        }
-        
-        #endregion
     }
-} 
+}
